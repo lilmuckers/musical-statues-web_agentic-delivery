@@ -6,6 +6,7 @@ interface VisualisationLayerProps {
   phase: AppPhase
   gameplay: GameplayState
   preparation: PlaylistPreparation | null
+  activeTrackElapsedSeconds: number
 }
 
 const phaseCopy: Record<AppPhase, { heading: string; subheading: string }> = {
@@ -59,7 +60,7 @@ function getFallbackCue(): VisualCueSignal {
   }
 }
 
-export function VisualisationLayer({ phase, gameplay, preparation }: VisualisationLayerProps) {
+export function VisualisationLayer({ phase, gameplay, preparation, activeTrackElapsedSeconds }: VisualisationLayerProps) {
   const copy = phaseCopy[phase]
   const orbCount = getOrbCount(phase)
   const [cueSignal, setCueSignal] = useState<VisualCueSignal>(() => getFallbackCue())
@@ -81,7 +82,7 @@ export function VisualisationLayer({ phase, gameplay, preparation }: Visualisati
 
       const envelope = await fetchTrackAnalysis(activeTrack.id, activeTrack.durationMs)
       if (cancelled) return
-      setCueSignal(createAnalysisCueSignal(envelope, gameplay.roundNumber))
+      setCueSignal(createAnalysisCueSignal(envelope, activeTrackElapsedSeconds))
     }
 
     void hydrateCue()
@@ -89,7 +90,7 @@ export function VisualisationLayer({ phase, gameplay, preparation }: Visualisati
     return () => {
       cancelled = true
     }
-  }, [activeTrack, gameplay.roundNumber])
+  }, [activeTrack, activeTrackElapsedSeconds])
 
   return (
     <section

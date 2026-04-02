@@ -61,10 +61,12 @@ describe('VisualisationLayer', () => {
           activeTrackName: 'Freeze Dance',
         }}
         preparation={preparation}
+        activeTrackElapsedSeconds={1.75}
       />,
     )
 
     await waitFor(() => expect(screen.getByText('analysis')).toBeInTheDocument())
+    expect(analysisModule.createAnalysisCueSignal).toHaveBeenCalledWith(expect.any(Object), 1.75)
     expect(screen.getByRole('heading', { name: 'Keep moving' })).toBeInTheDocument()
     expect(screen.getByText('Freeze Dance')).toBeInTheDocument()
     expect(screen.queryByText('Freeze!')).not.toBeInTheDocument()
@@ -81,6 +83,7 @@ describe('VisualisationLayer', () => {
           activeTrackName: 'Freeze Dance',
         }}
         preparation={preparation}
+        activeTrackElapsedSeconds={6.5}
       />,
     )
 
