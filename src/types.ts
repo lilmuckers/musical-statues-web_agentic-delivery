@@ -51,3 +51,32 @@ export interface PlaybackReadiness {
   isRecoverable: boolean
   sdkLoaded: boolean
 }
+
+export interface PlaylistSummary {
+  id: string
+  name: string
+  description: string | null
+  imageUrl: string | null
+  ownerName: string
+  trackCount: number
+  isCollaborative: boolean
+  isPublic: boolean | null
+}
+
+export interface SessionTrack {
+  id: string
+  name: string
+  artistNames: string[]
+  durationMs: number
+  albumName: string
+  isPlayable: boolean
+  reason: string | null
+}
+
+export interface PlaylistPreparation {
+  selectedPlaylistId: string | null
+  selectedPlaylistName: string | null
+  playableTracks: SessionTrack[]
+  skippedTracks: SessionTrack[]
+  totalTracks: number
+}
