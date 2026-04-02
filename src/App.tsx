@@ -118,7 +118,10 @@ export function App() {
   const [loadingPlaylists, setLoadingPlaylists] = useState(false)
   const [busyAction, setBusyAction] = useState<'sign-in' | 'sign-out' | 'prepare-device' | 'unlock-device' | 'prepare-session' | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
+  const [activeTrackElapsedMs, setActiveTrackElapsedMs] = useState(0)
   const controllerRef = useRef<PlaybackController | null>(null)
+  const activeRoundStartedAtRef = useRef<number | null>(null)
+  const activeTrackElapsedMsRef = useRef(0)
 
   const definition = phaseDefinitions[phase]
   const authCopy = authStateCopy[session.status]
@@ -212,6 +215,42 @@ export function App() {
   useEffect(() => {
     setPhase(derivePhase(isReadyForSession, gameplay))
   }, [gameplay, isReadyForSession])
+
+  useEffect(() => {
+    activeTrackElapsedMsRef.current = activeTrackElapsedMs
+  }, [activeTrackElapsedMs])
+
+  useEffect(() => {
+    if (gameplay.status === 'round-playing') {
+      if (activeRoundStartedAtRef.current === null) {
+        activeRoundStartedAtRef.current = Date.now() - activeTrackElapsedMsRef.current
+      }
+
+      const updateElapsed = () => {
+        if (activeRoundStartedAtRef.current !== null) {
+          setActiveTrackElapsedMs(Date.now() - activeRoundStartedAtRef.current)
+        }
+      }
+
+      updateElapsed()
+      const intervalId = window.setInterval(updateElapsed, 250)
+
+      return () => window.clearInterval(intervalId)
+    }
+
+    if (gameplay.status === 'idle' || gameplay.status === 'session-ended') {
+      activeRoundStartedAtRef.current = null
+      setActiveTrackElapsedMs(0)
+      return
+    }
+
+    if (gameplay.status === 'round-stopped') {
+      if (activeRoundStartedAtRef.current !== null) {
+        setActiveTrackElapsedMs(Date.now() - activeRoundStartedAtRef.current)
+      }
+      activeRoundStartedAtRef.current = null
+    }
+  }, [gameplay.status])
 
   function setGamePlaySafeReset(message = 'Prepare playback and a session playlist to unlock the first round.') {
     setGameplay({
@@ -402,7 +441,7 @@ export function App() {
       </aside>
 
       <main className="stage" style={{ '--phase-accent': definition.accent } as React.CSSProperties}>
-        <VisualisationLayer phase={phase} gameplay={gameplay} />
+        <VisualisationLayer phase={phase} gameplay={gameplay} preparation={preparation} activeTrackElapsedSeconds={activeTrackElapsedMs / 1000} />
 
         <section className="hero-card" aria-labelledby="phase-heading">
           <p className="status-pill">Current phase: {definition.label}</p>

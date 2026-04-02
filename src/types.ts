@@ -97,3 +97,14 @@ export interface GameplayTransitionResult {
   accepted: boolean
   reason: string
 }
+
+export interface VisualCueSignal {
+  tempoBpm: number | null
+  tempoNormalised: number
+  loudnessNormalised: number
+  energyNormalised: number
+  keyClass: number | null
+  currentSegmentIndex: number
+  segmentProgress: number
+  source: 'analysis' | 'fallback'
+}
