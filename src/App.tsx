@@ -159,6 +159,12 @@ export function App() {
   }, [loadingPlaylists, playlists.length, selectedPlaylistId, session.status])
 
   useEffect(() => {
+    if (preparation && selectedPlaylistId && preparation.selectedPlaylistId !== selectedPlaylistId) {
+      setPreparation(null)
+    }
+  }, [preparation, selectedPlaylistId])
+
+  useEffect(() => {
     setPhase(isReadyForSession ? 'ready' : 'setup')
   }, [isReadyForSession])
 
