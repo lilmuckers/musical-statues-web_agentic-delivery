@@ -87,6 +87,19 @@ describe('App gameplay control slice', () => {
     expect(screen.getByText(/Unavailable Jam/)).toBeInTheDocument()
   })
 
+  it('does not expose direct phase-navigation buttons that can bypass the gameplay reducer', async () => {
+    render(<App />)
+
+    const roundPhasesPanel = screen.getByText('Round phases').closest('.panel') as HTMLElement
+
+    await waitFor(() => {
+      expect(within(roundPhasesPanel).queryAllByRole('button')).toHaveLength(0)
+    })
+    expect(within(roundPhasesPanel).getByText('Reached only through the Start round gameplay control.')).toBeInTheDocument()
+    expect(within(roundPhasesPanel).getByText('Reached only through the Manual stop gameplay control.')).toBeInTheDocument()
+    expect(within(roundPhasesPanel).getByText('Reached only through the End session gameplay control.')).toBeInTheDocument()
+  })
+
   it('supports start, manual stop, next-round reset, and end session via deterministic host controls', async () => {
     const user = userEvent.setup()
     mockReadyHostShell()

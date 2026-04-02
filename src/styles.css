@@ -90,7 +90,7 @@ dt {
   list-style: none;
 }
 
-.phase-list li button {
+.phase-list__item {
   width: 100%;
   border: 1px solid rgba(148, 163, 184, 0.18);
   background: rgba(30, 41, 59, 0.8);
@@ -100,20 +100,25 @@ dt {
   text-align: left;
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
-  cursor: pointer;
+  gap: 0.25rem;
 }
 
-.phase-list li.is-active button {
+.phase-list li.is-active .phase-list__item {
   border-color: rgba(125, 211, 252, 0.7);
   box-shadow: 0 0 0 1px rgba(125, 211, 252, 0.4);
 }
 
 .phase-list small,
+.phase-list em,
 .panel ul,
 .panel p,
 .profile-list dd {
   color: #cbd5e1;
+}
+
+.phase-list em {
+  font-style: normal;
+  color: #94a3b8;
 }
 
 .status-chip {
@@ -202,41 +207,6 @@ select {
   background: rgba(8, 17, 31, 0.8);
   border: 1px solid rgba(255, 255, 255, 0.12);
   box-shadow: 0 24px 60px rgba(2, 6, 23, 0.3);
-}
-
-.hero-card__actions {
-  display: flex;
-  gap: 1rem;
-  flex-wrap: wrap;
-  margin-top: 1.5rem;
-}
-
-.hero-card__actions button,
-.phase-list li button,
-.primary {
-  transition: transform 160ms ease, opacity 160ms ease, border-color 160ms ease;
-}
-
-.hero-card__actions button,
-.stacked-actions button {
-  border: 0;
-  border-radius: 999px;
-  padding: 0.85rem 1.1rem;
-  background: rgba(148, 163, 184, 0.15);
-  color: inherit;
-  cursor: pointer;
-}
-
-.hero-card__actions button:hover:not(:disabled),
-.phase-list li button:hover,
-.stacked-actions button:hover:not(:disabled) {
-  transform: translateY(-1px);
-}
-
-.hero-card__actions button:disabled,
-.stacked-actions button:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
 }
 
 .hero-card__actions .primary,

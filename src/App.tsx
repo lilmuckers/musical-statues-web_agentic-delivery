@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { fetchPlaybackAccessToken, fetchSession, getDefaultSession, signOut, startLogin } from './auth'
-import { getNextPhase, getPreviousPhase, phaseDefinitions, phaseOrder } from './appShell'
+import { phaseDefinitions, phaseOrder } from './appShell'
 import { createInitialGameplayState, getGameplayActionAvailability, reduceGameplayState } from './gameplay'
 import { fetchPlaylists, getPlaylistPreparationSummary, preparePlaylistSession } from './playlist'
 import { getDefaultPlaybackReadiness, initialisePlaybackDevice, loadSpotifySdk, unlockPlaybackDevice, type PlaybackController } from './playback'
@@ -90,6 +90,21 @@ function getSetupReadinessChecks(session: AuthSession, playback: PlaybackReadine
   ]
 }
 
+function getPhaseGuardrailCopy(phase: AppPhase): string {
+  switch (phase) {
+    case 'setup':
+      return 'Reached automatically while prerequisites are incomplete.'
+    case 'ready':
+      return 'Reached automatically when playback and playlist preparation are complete.'
+    case 'playing':
+      return 'Reached only through the Start round gameplay control.'
+    case 'frozen':
+      return 'Reached only through the Manual stop gameplay control.'
+    case 'session-ended':
+      return 'Reached only through the End session gameplay control.'
+  }
+}
+
 export function App() {
   const [phase, setPhase] = useState<AppPhase>('setup')
   const [session, setSession] = useState<AuthSession>(() => getDefaultSession())
@@ -105,8 +120,6 @@ export function App() {
   const controllerRef = useRef<PlaybackController | null>(null)
 
   const definition = phaseDefinitions[phase]
-  const nextPhase = useMemo(() => getNextPhase(phase), [phase])
-  const previousPhase = useMemo(() => getPreviousPhase(phase), [phase])
   const authCopy = authStateCopy[session.status]
   const setupChecks = useMemo(() => getSetupReadinessChecks(session, playback, preparation, gameplay), [session, playback, preparation, gameplay])
   const isReadyForSession = playback.state === 'device-ready' && Boolean(preparation?.playableTracks.length)
@@ -374,7 +387,11 @@ export function App() {
 
         <div className="panel">
           <h2>Round phases</h2>
-          <ol className="phase-list">{phaseOrder.map((phaseId) => { const item = phaseDefinitions[phaseId]; const isActive = phaseId === phase; return <li key={phaseId} className={isActive ? 'is-active' : undefined}><button type="button" onClick={() => setPhase(phaseId)}><span>{item.label}</span><small>{item.heading}</small></button></li> })}</ol>
+          <ol className="phase-list">{phaseOrder.map((phaseId) => {
+            const item = phaseDefinitions[phaseId]
+            const isActive = phaseId === phase
+            return <li key={phaseId} className={isActive ? 'is-active' : undefined}><div className="phase-list__item"><span>{item.label}</span><small>{item.heading}</small><em>{getPhaseGuardrailCopy(phaseId)}</em></div></li>
+          })}</ol>
         </div>
 
         <div className="panel">
@@ -388,16 +405,12 @@ export function App() {
           <p className="status-pill">Current phase: {definition.label}</p>
           <h2 id="phase-heading">{definition.heading}</h2>
           <p>{definition.summary}</p>
-
-          <div className="hero-card__actions">
-            <button type="button" onClick={() => previousPhase && setPhase(previousPhase)} disabled={!previousPhase}>Previous state</button>
-            <button type="button" className="primary" onClick={() => nextPhase && setPhase(nextPhase)} disabled={!nextPhase || (phase === 'setup' && !isReadyForSession)}>{definition.nextActionLabel ?? 'Session complete'}</button>
-          </div>
+          <p className="lede">Phase transitions in this slice are reducer-driven: gameplay phases are reached through the facilitator controls, not direct UI navigation.</p>
         </section>
 
         <section className="panel panel--grid" aria-label="Delivery baseline details">
           <article><h3>What exists now</h3><p>The shell restores host session state, prepares the browser playback device, fetches Spotify playlists, resolves a playable session track list, and runs a deterministic gameplay state machine for facilitator controls.</p></article>
-          <article><h3>Control safety</h3><p>Invalid gameplay controls are disabled in the UI and also rejected safely by the pure reducer, so state transitions remain deterministic and testable outside the rendering layer.</p></article>
+          <article><h3>Control safety</h3><p>Invalid gameplay controls are disabled in the UI and also rejected safely by the pure reducer, and direct phase-navigation bypass has been removed so gameplay-visible state stays deterministic.</p></article>
           <article><h3>Next integration slices</h3><ul>{futureSlices.map((slice) => <li key={slice}>{slice}</li>)}</ul></article>
         </section>
       </main>
