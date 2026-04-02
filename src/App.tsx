@@ -402,7 +402,7 @@ export function App() {
       </aside>
 
       <main className="stage" style={{ '--phase-accent': definition.accent } as React.CSSProperties}>
-        <VisualisationLayer phase={phase} gameplay={gameplay} />
+        <VisualisationLayer phase={phase} gameplay={gameplay} preparation={preparation} />
 
         <section className="hero-card" aria-labelledby="phase-heading">
           <p className="status-pill">Current phase: {definition.label}</p>

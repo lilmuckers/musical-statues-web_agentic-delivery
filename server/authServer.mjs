@@ -410,6 +410,16 @@ export async function handleAuthRequest(request, response) {
       return true
     }
 
+    const audioAnalysisMatch = url.pathname.match(/^\/api\/spotify\/audio-analysis\/([^/]+)$/)
+    if (request.method === 'GET' && audioAnalysisMatch) {
+      const session = await requireSession(request, response, 'Spotify host session is not available for audio analysis.')
+      if (!session) return true
+      const trackId = audioAnalysisMatch[1]
+      const analysis = await spotifyFetch(session, `/audio-analysis/${trackId}`)
+      sendJson(response, 200, analysis)
+      return true
+    }
+
     const playlistPrepareMatch = url.pathname.match(/^\/api\/spotify\/playlists\/([^/]+)\/prepare$/)
     if (request.method === 'GET' && playlistPrepareMatch) {
       const session = await requireSession(request, response, 'Spotify host session is not available for playlist preparation.')

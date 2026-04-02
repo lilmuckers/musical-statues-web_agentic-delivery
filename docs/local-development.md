@@ -55,6 +55,14 @@ Vite will print the local development URL, typically `http://localhost:5173` or 
 
 ## Current auth + playback baseline
 
+This repo now also includes a baseline Spotify audio-analysis ingestion/mapping layer for visualisation work:
+
+- same-origin audio-analysis retrieval via backend session credentials
+- cached per-track analysis fetch outside the render path
+- mapped visual cues for tempo, loudness, key, segment timing, and timbre-derived energy variation
+- robust fallback envelopes when Spotify audio analysis is unavailable or partial
+
+
 This slice implements:
 
 - Spotify Authorization Code + PKCE sign-in
@@ -68,7 +76,7 @@ This slice implements:
 - in-app retry for recoverable device setup failures without forcing a full page reload
 - clear unsupported/degraded browser messaging when the SDK cannot be used safely
 
-Playlist preparation, actual playback transfer/control flows, and gameplay orchestration remain intentionally out of scope for this slice and land in follow-on issues.
+Rich analysis-driven visual behaviour can now build on the stable mapping layer, but detailed effect design/tuning still lands in follow-on slices.
 
 ## Playback readiness notes
 

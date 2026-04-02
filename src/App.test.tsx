@@ -24,6 +24,22 @@ vi.mock('./playlist', () => ({
   getPlaylistPreparationSummary: vi.fn((preparation) => preparation ? `${preparation.playableTracks.length} playable tracks ready, ${preparation.skippedTracks.length} skipped.` : 'No playlist prepared yet.'),
 }))
 
+vi.mock('./analysis', () => ({
+  fetchTrackAnalysis: vi.fn(),
+  createAnalysisCueSignal: vi.fn(() => ({
+    tempoBpm: 120,
+    tempoNormalised: 0.5,
+    loudnessNormalised: 0.7,
+    energyNormalised: 0.65,
+    keyClass: 5,
+    currentSegmentIndex: 0,
+    segmentProgress: 0.2,
+    source: 'analysis',
+  })),
+  prefetchSessionTrackAnalysis: vi.fn(),
+  clearAnalysisCache: vi.fn(),
+}))
+
 vi.mock('./playback', () => ({
   getDefaultPlaybackReadiness: vi.fn(() => ({
     state: 'idle', deviceName: null, deviceId: null, message: 'Sign in with an eligible Spotify Premium account to prepare the browser playback device.', needsUserAction: false, isRecoverable: false, sdkLoaded: false,
@@ -34,6 +50,7 @@ vi.mock('./playback', () => ({
 }))
 
 const authModule = await import('./auth')
+const analysisModule = await import('./analysis')
 const playlistModule = await import('./playlist')
 const playbackModule = await import('./playback')
 
@@ -98,6 +115,26 @@ describe('App gameplay control slice', () => {
     expect(within(roundPhasesPanel).getByText('Reached only through the Start round gameplay control.')).toBeInTheDocument()
     expect(within(roundPhasesPanel).getByText('Reached only through the Manual stop gameplay control.')).toBeInTheDocument()
     expect(within(roundPhasesPanel).getByText('Reached only through the End session gameplay control.')).toBeInTheDocument()
+  })
+
+  it('surfaces analysis-backed visual state with a stable fallback-friendly interface', async () => {
+    const user = userEvent.setup()
+    mockReadyHostShell()
+    vi.mocked(playlistModule.preparePlaylistSession).mockResolvedValue({
+      selectedPlaylistId: 'playlist-1', selectedPlaylistName: 'Party Starters', totalTracks: 1,
+      playableTracks: [{ id: 'track-1', name: 'Freeze Dance', artistNames: ['The Movers'], durationMs: 180000, albumName: 'Party', isPlayable: true, reason: null }],
+      skippedTracks: [],
+    })
+
+    render(<App />)
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Prepare browser playback' })).toBeEnabled())
+    await user.click(screen.getByRole('button', { name: 'Prepare browser playback' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Unlock browser audio' })).toBeEnabled())
+    await user.click(screen.getByRole('button', { name: 'Unlock browser audio' }))
+    await user.click(screen.getByRole('button', { name: 'Prepare session playlist' }))
+
+    await waitFor(() => expect(screen.getByText('analysis')).toBeInTheDocument())
+    expect(analysisModule.fetchTrackAnalysis).toHaveBeenCalled()
   })
 
   it('drives the visual layer distinctly for ready, playing, freeze, and session-end phases', async () => {

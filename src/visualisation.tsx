@@ -1,8 +1,11 @@
-import type { AppPhase, GameplayState } from './types'
+import { useEffect, useMemo, useState } from 'react'
+import { createAnalysisCueSignal, fetchTrackAnalysis } from './analysis'
+import type { AppPhase, GameplayState, PlaylistPreparation, VisualCueSignal } from './types'
 
 interface VisualisationLayerProps {
   phase: AppPhase
   gameplay: GameplayState
+  preparation: PlaylistPreparation | null
 }
 
 const phaseCopy: Record<AppPhase, { heading: string; subheading: string }> = {
@@ -43,12 +46,61 @@ function getOrbCount(phase: AppPhase): number {
   }
 }
 
-export function VisualisationLayer({ phase, gameplay }: VisualisationLayerProps) {
+function getFallbackCue(): VisualCueSignal {
+  return {
+    tempoBpm: null,
+    tempoNormalised: 0.35,
+    loudnessNormalised: 0.4,
+    energyNormalised: 0.35,
+    keyClass: null,
+    currentSegmentIndex: 0,
+    segmentProgress: 0,
+    source: 'fallback',
+  }
+}
+
+export function VisualisationLayer({ phase, gameplay, preparation }: VisualisationLayerProps) {
   const copy = phaseCopy[phase]
   const orbCount = getOrbCount(phase)
+  const [cueSignal, setCueSignal] = useState<VisualCueSignal>(() => getFallbackCue())
+
+  const activeTrack = useMemo(() => {
+    if (!preparation?.playableTracks.length) return null
+    if (!gameplay.activeTrackName) return preparation.playableTracks[0]
+    return preparation.playableTracks.find((track) => track.name === gameplay.activeTrackName) ?? preparation.playableTracks[0]
+  }, [gameplay.activeTrackName, preparation])
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function hydrateCue() {
+      if (!activeTrack) {
+        setCueSignal(getFallbackCue())
+        return
+      }
+
+      const envelope = await fetchTrackAnalysis(activeTrack.id, activeTrack.durationMs)
+      if (cancelled) return
+      setCueSignal(createAnalysisCueSignal(envelope, gameplay.roundNumber))
+    }
+
+    void hydrateCue()
+
+    return () => {
+      cancelled = true
+    }
+  }, [activeTrack, gameplay.roundNumber])
 
   return (
-    <section className={`visualisation visualisation--${phase}`} aria-label="Visualisation layer">
+    <section
+      className={`visualisation visualisation--${phase}`}
+      aria-label="Visualisation layer"
+      style={{
+        '--cue-energy': cueSignal.energyNormalised,
+        '--cue-tempo': cueSignal.tempoNormalised,
+        '--cue-loudness': cueSignal.loudnessNormalised,
+      } as React.CSSProperties}
+    >
       <div className="visualisation__backdrop" />
       <div className="visualisation__grid" />
       <div className="visualisation__orbs" aria-hidden="true">
@@ -57,7 +109,6 @@ export function VisualisationLayer({ phase, gameplay }: VisualisationLayerProps)
             key={`${phase}-${index}`}
             className="visualisation__orb"
             style={{
-              '--orb-index': index,
               '--orb-size': `${140 + (index % 3) * 48}px`,
               '--orb-left': `${8 + (index * 11) % 82}%`,
               '--orb-top': `${12 + (index * 9) % 74}%`,
@@ -82,7 +133,11 @@ export function VisualisationLayer({ phase, gameplay }: VisualisationLayerProps)
           </div>
           <div>
             <dt>Track</dt>
-            <dd>{gameplay.activeTrackName ?? 'Awaiting cue'}</dd>
+            <dd>{gameplay.activeTrackName ?? activeTrack?.name ?? 'Awaiting cue'}</dd>
+          </div>
+          <div>
+            <dt>Analysis source</dt>
+            <dd>{cueSignal.source}</dd>
           </div>
         </dl>
       </div>
