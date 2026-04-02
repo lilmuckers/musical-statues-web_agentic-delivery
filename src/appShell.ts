@@ -8,16 +8,16 @@ export const phaseDefinitions: Record<AppPhase, PhaseDefinition> = {
     label: 'Setup',
     heading: 'Prepare host session',
     summary:
-      'Authenticate the Spotify host, confirm session continuity, and leave playback/device setup to the next delivery slice.',
+      'Authenticate the Spotify host, prepare the browser playback device, and keep playlist/session work for the next slice.',
     accent: 'var(--phase-setup)',
     nextActionLabel: 'Mark setup complete',
   },
   ready: {
     id: 'ready',
     label: 'Ready',
-    heading: 'Session ready for playback setup',
+    heading: 'Session and browser player ready',
     summary:
-      'The host session is authenticated and restorable. Playback device readiness, playlist preparation, and host controls attach here next.',
+      'The host session is authenticated and the browser playback device has been prepared. Playlist preparation and gameplay controls attach here next.',
     accent: 'var(--phase-ready)',
     nextActionLabel: 'Start round',
   },

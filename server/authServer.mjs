@@ -347,6 +347,18 @@ export async function handleAuthRequest(request, response) {
       return true
     }
 
+    if (request.method === 'GET' && url.pathname === '/api/auth/playback-token') {
+      const session = await maybeRefreshSession(request, response)
+
+      if (!session || Date.now() >= session.expiresAt) {
+        sendText(response, 401, 'Spotify host session is not available for playback device setup.')
+        return true
+      }
+
+      sendJson(response, 200, { accessToken: session.accessToken })
+      return true
+    }
+
     if (request.method === 'POST' && url.pathname === '/api/auth/login') {
       const verifier = createPkceVerifier()
       const state = crypto.randomBytes(24).toString('base64url')

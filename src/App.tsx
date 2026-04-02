@@ -1,16 +1,10 @@
-import { useEffect, useMemo, useState } from 'react'
-import { fetchSession, getDefaultSession, signOut, startLogin } from './auth'
-import { getNextPhase, getPreviousPhase, phaseDefinitions, phaseOrder } from './appShell'
-import type { AppPhase, AuthSession, HostAuthState } from './types'
-
-const readinessChecks = [
-  'Spotify host session established',
-  'Browser playback device prepared (placeholder for issue #4)',
-  'Playlist selected and validated (placeholder for later slice)',
-]
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { fetchPlaybackAccessToken, fetchSession, getDefaultSession, signOut, startLogin } from './auth'
+import { deriveAppPhaseFromSession, getNextPhase, getPreviousPhase, phaseDefinitions, phaseOrder } from './appShell'
+import { getDefaultPlaybackReadiness, initialisePlaybackDevice, loadSpotifySdk, unlockPlaybackDevice, type PlaybackController } from './playback'
+import type { AppPhase, AuthSession, HostAuthState, PlaybackReadiness } from './types'
 
 const futureSlices = [
-  'Playback device readiness and browser constraints',
   'Playlist/session preparation',
   'Gameplay state machine and round controls',
   'Reactive visualisation and freeze transition',
@@ -27,7 +21,7 @@ const authStateCopy: Record<HostAuthState, { title: string; body: string }> = {
   },
   'session-ready': {
     title: 'Session ready',
-    body: 'The host session is active and ready for playback-device setup in the next delivery slice.',
+    body: 'The host session is active. The browser playback device can now be prepared in-app without reworking auth/session architecture.',
   },
   'not-premium': {
     title: 'Playback ineligible',
@@ -78,17 +72,40 @@ function getAuthStatusTone(status: HostAuthState): 'neutral' | 'good' | 'warning
   }
 }
 
+function getPlaybackStatusTone(state: PlaybackReadiness['state']): 'neutral' | 'good' | 'warning' {
+  switch (state) {
+    case 'device-ready':
+      return 'good'
+    case 'unsupported-browser':
+    case 'device-error':
+      return 'warning'
+    default:
+      return 'neutral'
+  }
+}
+
+function getReadinessChecks(session: AuthSession, playback: PlaybackReadiness): string[] {
+  return [
+    `Spotify host session: ${session.status === 'session-ready' ? 'ready' : authStateCopy[session.status].title.toLowerCase()}`,
+    `Browser playback device: ${playback.message}`,
+    'Playlist selected and validated (placeholder for later slice)',
+  ]
+}
+
 export function App() {
   const [phase, setPhase] = useState<AppPhase>('setup')
   const [session, setSession] = useState<AuthSession>(() => getDefaultSession())
+  const [playback, setPlayback] = useState<PlaybackReadiness>(() => getDefaultPlaybackReadiness())
   const [loadingSession, setLoadingSession] = useState(true)
-  const [busyAction, setBusyAction] = useState<'sign-in' | 'sign-out' | null>(null)
+  const [busyAction, setBusyAction] = useState<'sign-in' | 'sign-out' | 'prepare-device' | 'unlock-device' | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
+  const controllerRef = useRef<PlaybackController | null>(null)
 
   const definition = phaseDefinitions[phase]
   const nextPhase = useMemo(() => getNextPhase(phase), [phase])
   const previousPhase = useMemo(() => getPreviousPhase(phase), [phase])
   const authCopy = authStateCopy[session.status]
+  const readinessChecks = useMemo(() => getReadinessChecks(session, playback), [playback, session])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -106,13 +123,14 @@ export function App() {
             canResume: true,
             failureReason: authErrorMessage,
           })
+          setPlayback(getDefaultPlaybackReadiness())
           setPhase('setup')
           clearAuthErrorQueryParam()
           return
         }
 
         setSession(restored)
-        setPhase(restored.status === 'session-ready' ? 'ready' : 'setup')
+        setPhase(deriveAppPhaseFromSession(restored))
       } catch (error) {
         const message = authErrorMessage ?? (error instanceof Error ? error.message : 'Unable to restore Spotify session.')
         setSession({
@@ -121,6 +139,7 @@ export function App() {
           canResume: true,
           failureReason: message,
         })
+        setPlayback(getDefaultPlaybackReadiness())
         clearAuthErrorQueryParam()
       } finally {
         setLoadingSession(false)
@@ -131,6 +150,22 @@ export function App() {
 
     return () => controller.abort()
   }, [])
+
+  useEffect(() => {
+    if (session.status !== 'session-ready') {
+      controllerRef.current?.disconnect()
+      controllerRef.current = null
+      setPlayback(getDefaultPlaybackReadiness())
+      setPhase('setup')
+      return
+    }
+
+    if (playback.state === 'device-ready') {
+      setPhase('ready')
+    } else {
+      setPhase('setup')
+    }
+  }, [playback.state, session.status])
 
   async function handleSignIn() {
     setActionError(null)
@@ -152,11 +187,91 @@ export function App() {
     setBusyAction('sign-out')
 
     try {
+      controllerRef.current?.disconnect()
+      controllerRef.current = null
       const signedOut = await signOut()
       setSession(signedOut)
+      setPlayback(getDefaultPlaybackReadiness())
       setPhase('setup')
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to sign out of the Spotify session.'
+      setActionError(message)
+    } finally {
+      setBusyAction(null)
+    }
+  }
+
+  async function handlePrepareDevice() {
+    setActionError(null)
+    setBusyAction('prepare-device')
+    controllerRef.current?.disconnect()
+    controllerRef.current = null
+
+    try {
+      setPlayback({
+        state: 'sdk-loading',
+        deviceName: null,
+        deviceId: null,
+        message: 'Loading the Spotify Web Playback SDK…',
+        needsUserAction: false,
+        isRecoverable: false,
+        sdkLoaded: false,
+      })
+
+      await loadSpotifySdk()
+
+      setPlayback({
+        state: 'sdk-ready',
+        deviceName: 'Musical Statues Web Player',
+        deviceId: null,
+        message: 'Spotify SDK loaded. Creating the browser playback device…',
+        needsUserAction: false,
+        isRecoverable: false,
+        sdkLoaded: true,
+      })
+
+      const accessToken = await fetchPlaybackAccessToken()
+      const controller = await initialisePlaybackDevice(accessToken, setPlayback)
+      controllerRef.current = controller
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to prepare the Spotify browser playback device.'
+      const isUnsupported = message.includes('browser') || message.includes('secure context') || message.includes('media capabilities')
+
+      setPlayback({
+        state: isUnsupported ? 'unsupported-browser' : 'device-error',
+        deviceName: 'Musical Statues Web Player',
+        deviceId: null,
+        message,
+        needsUserAction: false,
+        isRecoverable: !isUnsupported,
+        sdkLoaded: false,
+      })
+      setActionError(message)
+    } finally {
+      setBusyAction(null)
+    }
+  }
+
+  async function handleUnlockPlayback() {
+    setActionError(null)
+    setBusyAction('unlock-device')
+
+    try {
+      const readiness = await unlockPlaybackDevice(controllerRef.current)
+      setPlayback((current) => ({
+        ...readiness,
+        deviceId: current.deviceId,
+        deviceName: current.deviceName ?? readiness.deviceName,
+      }))
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to complete the browser audio unlock step.'
+      setPlayback((current) => ({
+        ...current,
+        state: 'device-error',
+        message,
+        needsUserAction: false,
+        isRecoverable: true,
+      }))
       setActionError(message)
     } finally {
       setBusyAction(null)
@@ -169,8 +284,8 @@ export function App() {
         <p className="eyebrow">Musical Statues Web</p>
         <h1>Host control baseline</h1>
         <p className="lede">
-          Spotify auth/session lifecycle is now wired into the facilitator shell, with playback device
-          orchestration intentionally deferred to issue #4.
+          Spotify auth/session lifecycle and browser playback-device readiness are now wired into the facilitator shell,
+          with playlist preparation and gameplay controls still deferred to later slices.
         </p>
 
         <div className="panel">
@@ -223,6 +338,49 @@ export function App() {
         </div>
 
         <div className="panel">
+          <h2>Playback device readiness</h2>
+          <p className={`status-chip status-chip--${getPlaybackStatusTone(playback.state)}`}>{playback.state.replace(/-/g, ' ')}</p>
+          <p>{playback.message}</p>
+          {playback.deviceName ? (
+            <dl className="profile-list">
+              <div>
+                <dt>Device label</dt>
+                <dd>{playback.deviceName}</dd>
+              </div>
+              {playback.deviceId ? (
+                <div>
+                  <dt>Spotify device id</dt>
+                  <dd>{playback.deviceId}</dd>
+                </div>
+              ) : null}
+            </dl>
+          ) : null}
+          <div className="stacked-actions">
+            <button
+              type="button"
+              className="primary"
+              onClick={() => void handlePrepareDevice()}
+              disabled={session.status !== 'session-ready' || busyAction !== null}
+            >
+              {busyAction === 'prepare-device' ? 'Preparing device…' : playback.isRecoverable ? 'Retry device setup' : 'Prepare browser playback'}
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleUnlockPlayback()}
+              disabled={playback.state !== 'user-action-required' || busyAction !== null}
+            >
+              {busyAction === 'unlock-device' ? 'Unlocking audio…' : 'Unlock browser audio'}
+            </button>
+          </div>
+          <ul>
+            <li>Use a supported desktop browser with audio enabled.</li>
+            <li>Spotify browser playback requires a Premium host account.</li>
+            <li>The unlock action is the host-visible step for autoplay/user-gesture requirements.</li>
+            <li>If setup fails, retry in-app rather than reloading the page.</li>
+          </ul>
+        </div>
+
+        <div className="panel">
           <h2>Round phases</h2>
           <ol className="phase-list">
             {phaseOrder.map((phaseId) => {
@@ -271,17 +429,15 @@ export function App() {
           <article>
             <h3>What exists now</h3>
             <p>
-              The shell now restores same-origin host session state on reload, surfaces Premium/auth expiry conditions,
-              and keeps sign-out scoped to backend-session invalidation plus local UI reset.
+              The shell restores same-origin host session state, loads the Spotify Web Playback SDK, creates a browser device,
+              and keeps autoplay/user-gesture guidance visible as an explicit in-app step.
             </p>
           </article>
           <article>
-            <h3>Out of scope in this slice</h3>
-            <ul>
-              <li>Playback device orchestration beyond auth-continuity placeholders</li>
-              <li>Playlist browsing/selection workflows</li>
-              <li>Gameplay controls beyond the existing scaffold</li>
-            </ul>
+            <h3>Recovery posture</h3>
+            <p>
+              Device-init failures and unsupported browser conditions are surfaced in-app, and recoverable failures can be retried without forcing a full page reload.
+            </p>
           </article>
           <article>
             <h3>Next integration slices</h3>

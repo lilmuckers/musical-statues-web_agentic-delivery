@@ -138,6 +138,7 @@ dt {
 .status-chip--warning {
   background: rgba(249, 115, 22, 0.18);
   color: #fed7aa;
+  text-transform: capitalize;
 }
 
 .profile-list {
