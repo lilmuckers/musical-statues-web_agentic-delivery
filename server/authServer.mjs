@@ -165,13 +165,7 @@ function sendText(response, statusCode, body) {
 function getSessionFromRequest(request) {
   const cookies = parseCookies(request)
   const encryptedSession = cookies[sessionCookieName]
-  const session = decryptJson(encryptedSession)
-
-  if (!session) {
-    return null
-  }
-
-  return session
+  return decryptJson(encryptedSession)
 }
 
 function normaliseSession(session) {
@@ -284,6 +278,21 @@ async function refreshAccessToken(refreshToken) {
   return response.json()
 }
 
+async function spotifyFetch(session, path) {
+  const response = await fetch(`https://api.spotify.com/v1${path}`, {
+    headers: {
+      Authorization: `Bearer ${session.accessToken}`,
+    },
+  })
+
+  if (!response.ok) {
+    const text = await response.text()
+    throw new Error(`Spotify API request failed (${path}): ${text}`)
+  }
+
+  return response.json()
+}
+
 async function fetchSpotifyProfile(accessToken) {
   const response = await fetch('https://api.spotify.com/v1/me', {
     headers: {
@@ -337,6 +346,45 @@ async function maybeRefreshSession(request, response) {
   }
 }
 
+async function requireSession(request, response, missingMessage) {
+  const session = await maybeRefreshSession(request, response)
+
+  if (!session || Date.now() >= session.expiresAt) {
+    sendText(response, 401, missingMessage)
+    return null
+  }
+
+  return session
+}
+
+function mapPlaylistSummary(item) {
+  return {
+    id: item.id,
+    name: item.name,
+    description: item.description || null,
+    imageUrl: item.images?.[0]?.url ?? null,
+    ownerName: item.owner?.display_name ?? item.owner?.id ?? 'Spotify host',
+    trackCount: item.tracks?.total ?? 0,
+    isCollaborative: Boolean(item.collaborative),
+    isPublic: item.public ?? null,
+  }
+}
+
+function mapTrack(item, fallbackReason = null) {
+  const track = item?.track ?? item
+  const isPlayable = Boolean(track?.is_playable ?? false) && Boolean(track?.id)
+
+  return {
+    id: track?.id ?? `unresolved-${Math.random().toString(36).slice(2, 10)}`,
+    name: track?.name ?? 'Unavailable track',
+    artistNames: track?.artists?.map((artist) => artist.name) ?? ['Unknown artist'],
+    durationMs: track?.duration_ms ?? 0,
+    albumName: track?.album?.name ?? 'Unknown album',
+    isPlayable,
+    reason: isPlayable ? null : fallbackReason ?? (track?.is_local ? 'Local tracks are not playable through Spotify Web Playback SDK.' : 'Track is unavailable or not playable for this session.'),
+  }
+}
+
 export async function handleAuthRequest(request, response) {
   const url = new URL(request.url, `http://${request.headers.host}`)
 
@@ -348,14 +396,38 @@ export async function handleAuthRequest(request, response) {
     }
 
     if (request.method === 'GET' && url.pathname === '/api/auth/playback-token') {
-      const session = await maybeRefreshSession(request, response)
-
-      if (!session || Date.now() >= session.expiresAt) {
-        sendText(response, 401, 'Spotify host session is not available for playback device setup.')
-        return true
-      }
-
+      const session = await requireSession(request, response, 'Spotify host session is not available for playback device setup.')
+      if (!session) return true
       sendJson(response, 200, { accessToken: session.accessToken })
+      return true
+    }
+
+    if (request.method === 'GET' && url.pathname === '/api/spotify/playlists') {
+      const session = await requireSession(request, response, 'Spotify host session is not available for playlist browsing.')
+      if (!session) return true
+      const playlists = await spotifyFetch(session, '/me/playlists?limit=20')
+      sendJson(response, 200, { items: (playlists.items ?? []).map(mapPlaylistSummary) })
+      return true
+    }
+
+    const playlistPrepareMatch = url.pathname.match(/^\/api\/spotify\/playlists\/([^/]+)\/prepare$/)
+    if (request.method === 'GET' && playlistPrepareMatch) {
+      const session = await requireSession(request, response, 'Spotify host session is not available for playlist preparation.')
+      if (!session) return true
+      const playlistId = playlistPrepareMatch[1]
+      const playlist = await spotifyFetch(session, `/playlists/${playlistId}`)
+      const tracksPage = await spotifyFetch(session, `/playlists/${playlistId}/tracks?limit=100`)
+      const mappedTracks = (tracksPage.items ?? []).map((item) => mapTrack(item))
+      const playableTracks = mappedTracks.filter((track) => track.isPlayable)
+      const skippedTracks = mappedTracks.filter((track) => !track.isPlayable)
+
+      sendJson(response, 200, {
+        selectedPlaylistId: playlist.id,
+        selectedPlaylistName: playlist.name,
+        playableTracks,
+        skippedTracks,
+        totalTracks: mappedTracks.length,
+      })
       return true
     }
 
@@ -364,7 +436,6 @@ export async function handleAuthRequest(request, response) {
       const state = crypto.randomBytes(24).toString('base64url')
       const challenge = createPkceChallenge(verifier)
       const authorizeUrl = new URL('https://accounts.spotify.com/authorize')
-
       authorizeUrl.searchParams.set('client_id', getRequiredEnv('SPOTIFY_CLIENT_ID'))
       authorizeUrl.searchParams.set('response_type', 'code')
       authorizeUrl.searchParams.set('redirect_uri', getSpotifyRedirectUri())
@@ -373,7 +444,6 @@ export async function handleAuthRequest(request, response) {
       authorizeUrl.searchParams.set('scope', spotifyScopes.join(' '))
       authorizeUrl.searchParams.set('state', signValue(state))
       authorizeUrl.searchParams.set('show_dialog', 'false')
-
       setCookie(response, stateCookieName, signValue(state), 600)
       setCookie(response, pkceCookieName, signValue(verifier), 600)
       sendJson(response, 200, { authorizeUrl: authorizeUrl.toString() })
@@ -388,7 +458,6 @@ export async function handleAuthRequest(request, response) {
       const storedState = verifySignedValue(cookies[stateCookieName])
       const returnedState = verifySignedValue(state)
       const verifier = verifySignedValue(cookies[pkceCookieName])
-
       clearCookie(response, stateCookieName)
       clearCookie(response, pkceCookieName)
 

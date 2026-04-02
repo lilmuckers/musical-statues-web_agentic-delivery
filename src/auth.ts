@@ -45,6 +45,19 @@ export async function fetchPlaybackAccessToken(): Promise<string> {
   return body.accessToken
 }
 
+export async function fetchSpotifyApi<T>(path: string): Promise<T> {
+  const response = await fetch(path, {
+    credentials: 'include',
+  })
+
+  if (!response.ok) {
+    const message = await response.text()
+    throw new Error(message || 'Unable to load Spotify data.')
+  }
+
+  return (await response.json()) as T
+}
+
 export async function startLogin(): Promise<void> {
   const response = await fetch('/api/auth/login', {
     method: 'POST',

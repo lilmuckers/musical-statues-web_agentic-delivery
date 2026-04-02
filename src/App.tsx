@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { fetchPlaybackAccessToken, fetchSession, getDefaultSession, signOut, startLogin } from './auth'
-import { deriveAppPhaseFromSession, getNextPhase, getPreviousPhase, phaseDefinitions, phaseOrder } from './appShell'
+import { getNextPhase, getPreviousPhase, phaseDefinitions, phaseOrder } from './appShell'
+import { fetchPlaylists, getPlaylistPreparationSummary, preparePlaylistSession } from './playlist'
 import { getDefaultPlaybackReadiness, initialisePlaybackDevice, loadSpotifySdk, unlockPlaybackDevice, type PlaybackController } from './playback'
-import type { AppPhase, AuthSession, HostAuthState, PlaybackReadiness } from './types'
+import type { AppPhase, AuthSession, HostAuthState, PlaybackReadiness, PlaylistPreparation, PlaylistSummary } from './types'
 
 const futureSlices = [
-  'Playlist/session preparation',
   'Gameplay state machine and round controls',
   'Reactive visualisation and freeze transition',
 ]
@@ -21,7 +21,7 @@ const authStateCopy: Record<HostAuthState, { title: string; body: string }> = {
   },
   'session-ready': {
     title: 'Session ready',
-    body: 'The host session is active. The browser playback device can now be prepared in-app without reworking auth/session architecture.',
+    body: 'The host session is active. The browser playback device and playlist session can now be prepared in-app without reworking auth/session architecture.',
   },
   'not-premium': {
     title: 'Playback ineligible',
@@ -34,61 +34,42 @@ const authStateCopy: Record<HostAuthState, { title: string; body: string }> = {
 }
 
 function getAuthErrorMessage(authError: string | null): string | null {
-  if (!authError) {
-    return null
-  }
-
-  if (authError === 'state_mismatch') {
-    return 'Spotify sign-in could not be completed safely because the auth state check failed. Please try again.'
-  }
-
-  if (authError === 'access_denied') {
-    return 'Spotify sign-in was cancelled or permissions were denied before the host session could be established.'
-  }
-
+  if (!authError) return null
+  if (authError === 'state_mismatch') return 'Spotify sign-in could not be completed safely because the auth state check failed. Please try again.'
+  if (authError === 'access_denied') return 'Spotify sign-in was cancelled or permissions were denied before the host session could be established.'
   return `Spotify sign-in failed: ${authError.replace(/_/g, ' ')}.`
 }
 
 function clearAuthErrorQueryParam() {
   const url = new URL(window.location.href)
-
-  if (!url.searchParams.has('authError')) {
-    return
-  }
-
+  if (!url.searchParams.has('authError')) return
   url.searchParams.delete('authError')
   window.history.replaceState({}, document.title, url.toString())
 }
 
 function getAuthStatusTone(status: HostAuthState): 'neutral' | 'good' | 'warning' {
   switch (status) {
-    case 'session-ready':
-      return 'good'
+    case 'session-ready': return 'good'
     case 'not-premium':
-    case 'session-expired':
-      return 'warning'
-    default:
-      return 'neutral'
+    case 'session-expired': return 'warning'
+    default: return 'neutral'
   }
 }
 
 function getPlaybackStatusTone(state: PlaybackReadiness['state']): 'neutral' | 'good' | 'warning' {
   switch (state) {
-    case 'device-ready':
-      return 'good'
+    case 'device-ready': return 'good'
     case 'unsupported-browser':
-    case 'device-error':
-      return 'warning'
-    default:
-      return 'neutral'
+    case 'device-error': return 'warning'
+    default: return 'neutral'
   }
 }
 
-function getReadinessChecks(session: AuthSession, playback: PlaybackReadiness): string[] {
+function getSetupReadinessChecks(session: AuthSession, playback: PlaybackReadiness, preparation: PlaylistPreparation | null): string[] {
   return [
     `Spotify host session: ${session.status === 'session-ready' ? 'ready' : authStateCopy[session.status].title.toLowerCase()}`,
-    `Browser playback device: ${playback.message}`,
-    'Playlist selected and validated (placeholder for later slice)',
+    `Browser playback device: ${playback.state === 'device-ready' ? 'ready' : playback.message}`,
+    `Playlist session preparation: ${getPlaylistPreparationSummary(preparation)}`,
   ]
 }
 
@@ -96,8 +77,12 @@ export function App() {
   const [phase, setPhase] = useState<AppPhase>('setup')
   const [session, setSession] = useState<AuthSession>(() => getDefaultSession())
   const [playback, setPlayback] = useState<PlaybackReadiness>(() => getDefaultPlaybackReadiness())
+  const [playlists, setPlaylists] = useState<PlaylistSummary[]>([])
+  const [selectedPlaylistId, setSelectedPlaylistId] = useState('')
+  const [preparation, setPreparation] = useState<PlaylistPreparation | null>(null)
   const [loadingSession, setLoadingSession] = useState(true)
-  const [busyAction, setBusyAction] = useState<'sign-in' | 'sign-out' | 'prepare-device' | 'unlock-device' | null>(null)
+  const [loadingPlaylists, setLoadingPlaylists] = useState(false)
+  const [busyAction, setBusyAction] = useState<'sign-in' | 'sign-out' | 'prepare-device' | 'unlock-device' | 'prepare-session' | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const controllerRef = useRef<PlaybackController | null>(null)
 
@@ -105,7 +90,8 @@ export function App() {
   const nextPhase = useMemo(() => getNextPhase(phase), [phase])
   const previousPhase = useMemo(() => getPreviousPhase(phase), [phase])
   const authCopy = authStateCopy[session.status]
-  const readinessChecks = useMemo(() => getReadinessChecks(session, playback), [playback, session])
+  const setupChecks = useMemo(() => getSetupReadinessChecks(session, playback, preparation), [session, playback, preparation])
+  const isReadyForSession = playback.state === 'device-ready' && Boolean(preparation?.playableTracks.length)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -117,12 +103,7 @@ export function App() {
         const restored = await fetchSession(controller.signal)
 
         if (authErrorMessage) {
-          setSession({
-            ...getDefaultSession(),
-            status: 'session-expired',
-            canResume: true,
-            failureReason: authErrorMessage,
-          })
+          setSession({ ...getDefaultSession(), status: 'session-expired', canResume: true, failureReason: authErrorMessage })
           setPlayback(getDefaultPlaybackReadiness())
           setPhase('setup')
           clearAuthErrorQueryParam()
@@ -130,15 +111,10 @@ export function App() {
         }
 
         setSession(restored)
-        setPhase(deriveAppPhaseFromSession(restored))
+        setPhase('setup')
       } catch (error) {
         const message = authErrorMessage ?? (error instanceof Error ? error.message : 'Unable to restore Spotify session.')
-        setSession({
-          ...getDefaultSession(),
-          status: 'session-expired',
-          canResume: true,
-          failureReason: message,
-        })
+        setSession({ ...getDefaultSession(), status: 'session-expired', canResume: true, failureReason: message })
         setPlayback(getDefaultPlaybackReadiness())
         clearAuthErrorQueryParam()
       } finally {
@@ -147,7 +123,6 @@ export function App() {
     }
 
     void restoreSession()
-
     return () => controller.abort()
   }, [])
 
@@ -156,22 +131,47 @@ export function App() {
       controllerRef.current?.disconnect()
       controllerRef.current = null
       setPlayback(getDefaultPlaybackReadiness())
+      setPlaylists([])
+      setSelectedPlaylistId('')
+      setPreparation(null)
       setPhase('setup')
       return
     }
 
-    if (playback.state === 'device-ready') {
-      setPhase('ready')
-    } else {
-      setPhase('setup')
+    if (playlists.length > 0 || loadingPlaylists) {
+      return
     }
-  }, [playback.state, session.status])
+
+    async function loadLists() {
+      setLoadingPlaylists(true)
+      try {
+        const items = await fetchPlaylists()
+        setPlaylists(items)
+        if (!selectedPlaylistId && items[0]) setSelectedPlaylistId(items[0].id)
+      } catch (error) {
+        setActionError(error instanceof Error ? error.message : 'Unable to load Spotify playlists.')
+      } finally {
+        setLoadingPlaylists(false)
+      }
+    }
+
+    void loadLists()
+  }, [loadingPlaylists, playlists.length, selectedPlaylistId, session.status])
+
+  useEffect(() => {
+    if (preparation && selectedPlaylistId && preparation.selectedPlaylistId !== selectedPlaylistId) {
+      setPreparation(null)
+    }
+  }, [preparation, selectedPlaylistId])
+
+  useEffect(() => {
+    setPhase(isReadyForSession ? 'ready' : 'setup')
+  }, [isReadyForSession])
 
   async function handleSignIn() {
     setActionError(null)
     setBusyAction('sign-in')
     setSession((current) => ({ ...current, status: 'auth-in-progress', failureReason: null }))
-
     try {
       await startLogin()
     } catch (error) {
@@ -185,17 +185,18 @@ export function App() {
   async function handleSignOut() {
     setActionError(null)
     setBusyAction('sign-out')
-
     try {
       controllerRef.current?.disconnect()
       controllerRef.current = null
       const signedOut = await signOut()
       setSession(signedOut)
       setPlayback(getDefaultPlaybackReadiness())
+      setPlaylists([])
+      setSelectedPlaylistId('')
+      setPreparation(null)
       setPhase('setup')
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unable to sign out of the Spotify session.'
-      setActionError(message)
+      setActionError(error instanceof Error ? error.message : 'Unable to sign out of the Spotify session.')
     } finally {
       setBusyAction(null)
     }
@@ -206,46 +207,17 @@ export function App() {
     setBusyAction('prepare-device')
     controllerRef.current?.disconnect()
     controllerRef.current = null
-
     try {
-      setPlayback({
-        state: 'sdk-loading',
-        deviceName: null,
-        deviceId: null,
-        message: 'Loading the Spotify Web Playback SDK…',
-        needsUserAction: false,
-        isRecoverable: false,
-        sdkLoaded: false,
-      })
-
+      setPlayback({ state: 'sdk-loading', deviceName: null, deviceId: null, message: 'Loading the Spotify Web Playback SDK…', needsUserAction: false, isRecoverable: false, sdkLoaded: false })
       await loadSpotifySdk()
-
-      setPlayback({
-        state: 'sdk-ready',
-        deviceName: 'Musical Statues Web Player',
-        deviceId: null,
-        message: 'Spotify SDK loaded. Creating the browser playback device…',
-        needsUserAction: false,
-        isRecoverable: false,
-        sdkLoaded: true,
-      })
-
+      setPlayback({ state: 'sdk-ready', deviceName: 'Musical Statues Web Player', deviceId: null, message: 'Spotify SDK loaded. Creating the browser playback device…', needsUserAction: false, isRecoverable: false, sdkLoaded: true })
       const accessToken = await fetchPlaybackAccessToken()
       const controller = await initialisePlaybackDevice(accessToken, setPlayback)
       controllerRef.current = controller
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to prepare the Spotify browser playback device.'
       const isUnsupported = message.includes('browser') || message.includes('secure context') || message.includes('media capabilities')
-
-      setPlayback({
-        state: isUnsupported ? 'unsupported-browser' : 'device-error',
-        deviceName: 'Musical Statues Web Player',
-        deviceId: null,
-        message,
-        needsUserAction: false,
-        isRecoverable: !isUnsupported,
-        sdkLoaded: false,
-      })
+      setPlayback({ state: isUnsupported ? 'unsupported-browser' : 'device-error', deviceName: 'Musical Statues Web Player', deviceId: null, message, needsUserAction: false, isRecoverable: !isUnsupported, sdkLoaded: false })
       setActionError(message)
     } finally {
       setBusyAction(null)
@@ -255,24 +227,27 @@ export function App() {
   async function handleUnlockPlayback() {
     setActionError(null)
     setBusyAction('unlock-device')
-
     try {
       const readiness = await unlockPlaybackDevice(controllerRef.current)
-      setPlayback((current) => ({
-        ...readiness,
-        deviceId: current.deviceId,
-        deviceName: current.deviceName ?? readiness.deviceName,
-      }))
+      setPlayback((current) => ({ ...readiness, deviceId: current.deviceId, deviceName: current.deviceName ?? readiness.deviceName }))
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to complete the browser audio unlock step.'
-      setPlayback((current) => ({
-        ...current,
-        state: 'device-error',
-        message,
-        needsUserAction: false,
-        isRecoverable: true,
-      }))
+      setPlayback((current) => ({ ...current, state: 'device-error', message, needsUserAction: false, isRecoverable: true }))
       setActionError(message)
+    } finally {
+      setBusyAction(null)
+    }
+  }
+
+  async function handlePrepareSession() {
+    if (!selectedPlaylistId) return
+    setActionError(null)
+    setBusyAction('prepare-session')
+    try {
+      const prepared = await preparePlaylistSession(selectedPlaylistId)
+      setPreparation(prepared)
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Unable to prepare the selected playlist session.')
     } finally {
       setBusyAction(null)
     }
@@ -283,129 +258,60 @@ export function App() {
       <aside className="app-shell__sidebar">
         <p className="eyebrow">Musical Statues Web</p>
         <h1>Host control baseline</h1>
-        <p className="lede">
-          Spotify auth/session lifecycle and browser playback-device readiness are now wired into the facilitator shell,
-          with playlist preparation and gameplay controls still deferred to later slices.
-        </p>
+        <p className="lede">Auth, browser playback readiness, and playlist/session preparation are now wired into the facilitator shell; gameplay flow remains deferred to the next slice.</p>
 
         <div className="panel">
           <h2>Host auth state</h2>
-          {loadingSession ? (
-            <p>Restoring host session…</p>
-          ) : (
-            <>
-              <p className={`status-chip status-chip--${getAuthStatusTone(session.status)}`}>{authCopy.title}</p>
-              <p>{authCopy.body}</p>
-              {session.profile ? (
-                <dl className="profile-list">
-                  <div>
-                    <dt>Host</dt>
-                    <dd>{session.profile.displayName}</dd>
-                  </div>
-                  <div>
-                    <dt>Spotify plan</dt>
-                    <dd>{session.profile.product}</dd>
-                  </div>
-                  {session.expiresAt ? (
-                    <div>
-                      <dt>Session expiry</dt>
-                      <dd>{new Date(session.expiresAt).toLocaleString()}</dd>
-                    </div>
-                  ) : null}
-                </dl>
-              ) : null}
-              {session.failureReason ? <p className="error-copy">{session.failureReason}</p> : null}
-              {actionError ? <p className="error-copy">{actionError}</p> : null}
-              <div className="stacked-actions">
-                <button
-                  type="button"
-                  className="primary"
-                  onClick={() => void handleSignIn()}
-                  disabled={busyAction !== null || session.status === 'auth-in-progress'}
-                >
-                  {busyAction === 'sign-in' || session.status === 'auth-in-progress' ? 'Connecting to Spotify…' : 'Sign in with Spotify'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void handleSignOut()}
-                  disabled={!session.isAuthenticated || busyAction !== null}
-                >
-                  Sign out
-                </button>
-              </div>
-            </>
-          )}
+          {loadingSession ? <p>Restoring host session…</p> : <>
+            <p className={`status-chip status-chip--${getAuthStatusTone(session.status)}`}>{authCopy.title}</p>
+            <p>{authCopy.body}</p>
+            {session.profile ? <dl className="profile-list"><div><dt>Host</dt><dd>{session.profile.displayName}</dd></div><div><dt>Spotify plan</dt><dd>{session.profile.product}</dd></div>{session.expiresAt ? <div><dt>Session expiry</dt><dd>{new Date(session.expiresAt).toLocaleString()}</dd></div> : null}</dl> : null}
+            {session.failureReason ? <p className="error-copy">{session.failureReason}</p> : null}
+            {actionError ? <p className="error-copy">{actionError}</p> : null}
+            <div className="stacked-actions">
+              <button type="button" className="primary" onClick={() => void handleSignIn()} disabled={busyAction !== null || session.status === 'auth-in-progress'}>{busyAction === 'sign-in' || session.status === 'auth-in-progress' ? 'Connecting to Spotify…' : 'Sign in with Spotify'}</button>
+              <button type="button" onClick={() => void handleSignOut()} disabled={!session.isAuthenticated || busyAction !== null}>Sign out</button>
+            </div>
+          </>}
         </div>
 
         <div className="panel">
           <h2>Playback device readiness</h2>
           <p className={`status-chip status-chip--${getPlaybackStatusTone(playback.state)}`}>{playback.state.replace(/-/g, ' ')}</p>
           <p>{playback.message}</p>
-          {playback.deviceName ? (
-            <dl className="profile-list">
-              <div>
-                <dt>Device label</dt>
-                <dd>{playback.deviceName}</dd>
-              </div>
-              {playback.deviceId ? (
-                <div>
-                  <dt>Spotify device id</dt>
-                  <dd>{playback.deviceId}</dd>
-                </div>
-              ) : null}
-            </dl>
-          ) : null}
           <div className="stacked-actions">
-            <button
-              type="button"
-              className="primary"
-              onClick={() => void handlePrepareDevice()}
-              disabled={session.status !== 'session-ready' || busyAction !== null}
-            >
-              {busyAction === 'prepare-device' ? 'Preparing device…' : playback.isRecoverable ? 'Retry device setup' : 'Prepare browser playback'}
-            </button>
-            <button
-              type="button"
-              onClick={() => void handleUnlockPlayback()}
-              disabled={playback.state !== 'user-action-required' || busyAction !== null}
-            >
-              {busyAction === 'unlock-device' ? 'Unlocking audio…' : 'Unlock browser audio'}
-            </button>
+            <button type="button" className="primary" onClick={() => void handlePrepareDevice()} disabled={session.status !== 'session-ready' || busyAction !== null}>{busyAction === 'prepare-device' ? 'Preparing device…' : playback.isRecoverable ? 'Retry device setup' : 'Prepare browser playback'}</button>
+            <button type="button" onClick={() => void handleUnlockPlayback()} disabled={playback.state !== 'user-action-required' || busyAction !== null}>{busyAction === 'unlock-device' ? 'Unlocking audio…' : 'Unlock browser audio'}</button>
           </div>
-          <ul>
-            <li>Use a supported desktop browser with audio enabled.</li>
-            <li>Spotify browser playback requires a Premium host account.</li>
-            <li>The unlock action is the host-visible step for autoplay/user-gesture requirements.</li>
-            <li>If setup fails, retry in-app rather than reloading the page.</li>
-          </ul>
+        </div>
+
+        <div className="panel">
+          <h2>Playlist session preparation</h2>
+          {loadingPlaylists ? <p>Loading Spotify playlists…</p> : <>
+            <label className="field-label" htmlFor="playlist-select">Playlist</label>
+            <select id="playlist-select" value={selectedPlaylistId} onChange={(event) => setSelectedPlaylistId(event.target.value)} disabled={session.status !== 'session-ready' || busyAction !== null || playlists.length === 0}>
+              <option value="">Select a playlist…</option>
+              {playlists.map((playlist) => <option key={playlist.id} value={playlist.id}>{playlist.name} ({playlist.trackCount} tracks)</option>)}
+            </select>
+            <div className="stacked-actions">
+              <button type="button" className="primary" onClick={() => void handlePrepareSession()} disabled={!selectedPlaylistId || playback.state !== 'device-ready' || busyAction !== null}>{busyAction === 'prepare-session' ? 'Preparing playlist…' : 'Prepare session playlist'}</button>
+            </div>
+            <p>{getPlaylistPreparationSummary(preparation)}</p>
+            {preparation ? <>
+              <p><strong>{preparation.selectedPlaylistName}</strong>: {preparation.playableTracks.length} playable / {preparation.totalTracks} total.</p>
+              {preparation.skippedTracks.length > 0 ? <ul>{preparation.skippedTracks.slice(0, 5).map((track) => <li key={track.id}>{track.name} — {track.reason}</li>)}</ul> : <p>No unusable tracks were flagged in the current playlist slice.</p>}
+            </> : null}
+          </>}
         </div>
 
         <div className="panel">
           <h2>Round phases</h2>
-          <ol className="phase-list">
-            {phaseOrder.map((phaseId) => {
-              const item = phaseDefinitions[phaseId]
-              const isActive = phaseId === phase
-
-              return (
-                <li key={phaseId} className={isActive ? 'is-active' : undefined}>
-                  <button type="button" onClick={() => setPhase(phaseId)}>
-                    <span>{item.label}</span>
-                    <small>{item.heading}</small>
-                  </button>
-                </li>
-              )
-            })}
-          </ol>
+          <ol className="phase-list">{phaseOrder.map((phaseId) => { const item = phaseDefinitions[phaseId]; const isActive = phaseId === phase; return <li key={phaseId} className={isActive ? 'is-active' : undefined}><button type="button" onClick={() => setPhase(phaseId)}><span>{item.label}</span><small>{item.heading}</small></button></li> })}</ol>
         </div>
 
         <div className="panel">
           <h2>Readiness scaffold</h2>
-          <ul>
-            {readinessChecks.map((item) => (
-              <li key={item}>{item}</li>
-            ))}
-          </ul>
+          <ul>{setupChecks.map((item) => <li key={item}>{item}</li>)}</ul>
         </div>
       </aside>
 
@@ -414,39 +320,16 @@ export function App() {
           <p className="status-pill">Current phase: {definition.label}</p>
           <h2 id="phase-heading">{definition.heading}</h2>
           <p>{definition.summary}</p>
-
           <div className="hero-card__actions">
-            <button type="button" onClick={() => previousPhase && setPhase(previousPhase)} disabled={!previousPhase}>
-              Previous state
-            </button>
-            <button type="button" className="primary" onClick={() => nextPhase && setPhase(nextPhase)} disabled={!nextPhase}>
-              {definition.nextActionLabel ?? 'Session complete'}
-            </button>
+            <button type="button" onClick={() => previousPhase && setPhase(previousPhase)} disabled={!previousPhase}>Previous state</button>
+            <button type="button" className="primary" onClick={() => nextPhase && setPhase(nextPhase)} disabled={!nextPhase || (phase === 'setup' && !isReadyForSession)}>{definition.nextActionLabel ?? 'Session complete'}</button>
           </div>
         </section>
 
         <section className="panel panel--grid" aria-label="Delivery baseline details">
-          <article>
-            <h3>What exists now</h3>
-            <p>
-              The shell restores same-origin host session state, loads the Spotify Web Playback SDK, creates a browser device,
-              and keeps autoplay/user-gesture guidance visible as an explicit in-app step.
-            </p>
-          </article>
-          <article>
-            <h3>Recovery posture</h3>
-            <p>
-              Device-init failures and unsupported browser conditions are surfaced in-app, and recoverable failures can be retried without forcing a full page reload.
-            </p>
-          </article>
-          <article>
-            <h3>Next integration slices</h3>
-            <ul>
-              {futureSlices.map((slice) => (
-                <li key={slice}>{slice}</li>
-              ))}
-            </ul>
-          </article>
+          <article><h3>What exists now</h3><p>The shell restores host session state, prepares the browser playback device, fetches Spotify playlists, and resolves a session-ready playable track list while visibly flagging skipped tracks.</p></article>
+          <article><h3>Ready gating</h3><p>The app only enters Ready once both browser playback readiness and playlist/session preparation preconditions are satisfied.</p></article>
+          <article><h3>Next integration slices</h3><ul>{futureSlices.map((slice) => <li key={slice}>{slice}</li>)}</ul></article>
         </section>
       </main>
     </div>
