@@ -1,39 +1,150 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { App } from './App'
 
+const assignMock = vi.fn()
+
+vi.mock('./auth', () => ({
+  fetchSession: vi.fn(),
+  getDefaultSession: vi.fn(() => ({
+    status: 'signed-out',
+    isAuthenticated: false,
+    profile: null,
+    scopes: [],
+    expiresAt: null,
+    canResume: false,
+    failureReason: null,
+  })),
+  startLogin: vi.fn(),
+  signOut: vi.fn(),
+}))
+
+const authModule = await import('./auth')
+
+beforeEach(() => {
+  vi.clearAllMocks()
+  Object.defineProperty(window, 'location', {
+    configurable: true,
+    value: {
+      assign: assignMock,
+    },
+  })
+})
+
 describe('App shell baseline', () => {
-  it('renders the placeholder host shell and allows phase progression', async () => {
-    const user = userEvent.setup()
+  it('restores a ready Spotify host session and surfaces the host profile', async () => {
+    vi.mocked(authModule.fetchSession).mockResolvedValue({
+      status: 'session-ready',
+      isAuthenticated: true,
+      profile: {
+        displayName: 'Patrick',
+        product: 'premium',
+      },
+      scopes: ['streaming'],
+      expiresAt: '2026-04-02T11:00:00.000Z',
+      canResume: true,
+      failureReason: null,
+    })
 
     render(<App />)
 
-    expect(screen.getByRole('heading', { name: 'Host control baseline' })).toBeInTheDocument()
-    expect(screen.getByText('Current phase: Setup')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Prepare host session' })).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByText('Session ready')).toBeInTheDocument()
+    })
 
-    await user.click(screen.getByRole('button', { name: 'Mark setup complete' }))
-
+    expect(screen.getByText('Patrick')).toBeInTheDocument()
+    expect(screen.getByText('premium')).toBeInTheDocument()
     expect(screen.getByText('Current phase: Ready')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Ready for the first round' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Session ready for playback setup' })).toBeInTheDocument()
+  })
+
+  it('starts Spotify sign-in and keeps the UI in an auth-in-progress state until redirect', async () => {
+    const user = userEvent.setup()
+    vi.mocked(authModule.fetchSession).mockResolvedValue({
+      status: 'signed-out',
+      isAuthenticated: false,
+      profile: null,
+      scopes: [],
+      expiresAt: null,
+      canResume: false,
+      failureReason: null,
+    })
+    vi.mocked(authModule.startLogin).mockResolvedValue()
+
+    render(<App />)
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Sign in with Spotify' })).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('button', { name: 'Sign in with Spotify' }))
+
+    expect(authModule.startLogin).toHaveBeenCalledTimes(1)
+    expect(screen.getByText('Auth in progress')).toBeInTheDocument()
+  })
+
+  it('signs out and returns the shell to setup state', async () => {
+    const user = userEvent.setup()
+    vi.mocked(authModule.fetchSession).mockResolvedValue({
+      status: 'session-ready',
+      isAuthenticated: true,
+      profile: {
+        displayName: 'Patrick',
+        product: 'premium',
+      },
+      scopes: ['streaming'],
+      expiresAt: '2026-04-02T11:00:00.000Z',
+      canResume: true,
+      failureReason: null,
+    })
+    vi.mocked(authModule.signOut).mockResolvedValue({
+      status: 'signed-out',
+      isAuthenticated: false,
+      profile: null,
+      scopes: [],
+      expiresAt: null,
+      canResume: false,
+      failureReason: null,
+    })
+
+    render(<App />)
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Sign out' })).toBeEnabled()
+    })
+
+    await user.click(screen.getByRole('button', { name: 'Sign out' }))
+
+    await waitFor(() => {
+      expect(screen.getByText('Signed out')).toBeInTheDocument()
+    })
+    expect(screen.getByText('Current phase: Setup')).toBeInTheDocument()
+  })
+
+  it('still allows phase progression through placeholder gameplay states', async () => {
+    const user = userEvent.setup()
+    vi.mocked(authModule.fetchSession).mockResolvedValue({
+      status: 'session-ready',
+      isAuthenticated: true,
+      profile: {
+        displayName: 'Patrick',
+        product: 'premium',
+      },
+      scopes: ['streaming'],
+      expiresAt: '2026-04-02T11:00:00.000Z',
+      canResume: true,
+      failureReason: null,
+    })
+
+    render(<App />)
+
+    await waitFor(() => {
+      expect(screen.getByText('Current phase: Ready')).toBeInTheDocument()
+    })
 
     await user.click(screen.getByRole('button', { name: 'Start round' }))
 
     expect(screen.getByText('Current phase: Playing')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Trigger freeze' })).toBeInTheDocument()
-  })
-
-  it('shows the freeze and session-end placeholder states', async () => {
-    const user = userEvent.setup()
-
-    render(<App />)
-
-    await user.click(screen.getByRole('button', { name: 'Freeze Freeze moment' }))
-    expect(screen.getByText('Current phase: Freeze')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Freeze moment' })).toBeInTheDocument()
-
-    await user.click(screen.getByRole('button', { name: 'End session' }))
-    expect(screen.getByText('Current phase: Session end')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Session complete' })).toBeDisabled()
   })
 })

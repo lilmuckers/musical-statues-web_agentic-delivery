@@ -1,4 +1,4 @@
-import type { AppPhase, PhaseDefinition } from './types'
+import type { AppPhase, AuthSession, PhaseDefinition } from './types'
 
 export const phaseOrder: AppPhase[] = ['setup', 'ready', 'playing', 'frozen', 'session-ended']
 
@@ -8,16 +8,16 @@ export const phaseDefinitions: Record<AppPhase, PhaseDefinition> = {
     label: 'Setup',
     heading: 'Prepare host session',
     summary:
-      'Confirm Spotify sign-in, choose a playlist, and satisfy browser playback requirements before starting the game.',
+      'Authenticate the Spotify host, confirm session continuity, and leave playback/device setup to the next delivery slice.',
     accent: 'var(--phase-setup)',
     nextActionLabel: 'Mark setup complete',
   },
   ready: {
     id: 'ready',
     label: 'Ready',
-    heading: 'Ready for the first round',
+    heading: 'Session ready for playback setup',
     summary:
-      'The host session is ready. Playback device readiness, playlist preparation, and gameplay controls will attach here next.',
+      'The host session is authenticated and restorable. Playback device readiness, playlist preparation, and host controls attach here next.',
     accent: 'var(--phase-ready)',
     nextActionLabel: 'Start round',
   },
@@ -26,7 +26,7 @@ export const phaseDefinitions: Record<AppPhase, PhaseDefinition> = {
     label: 'Playing',
     heading: 'Music is playing',
     summary:
-      'This placeholder state reserves the future live round surface for Spotify playback, host controls, and reactive visualisation.',
+      'This remains a placeholder state until the playback-device and playlist slices connect live Spotify playback to the gameplay shell.',
     accent: 'var(--phase-playing)',
     nextActionLabel: 'Trigger freeze',
   },
@@ -35,7 +35,7 @@ export const phaseDefinitions: Record<AppPhase, PhaseDefinition> = {
     label: 'Freeze',
     heading: 'Freeze moment',
     summary:
-      'The app shell already distinguishes the stop moment so the later visual layer and round logic can plug into a clear state boundary.',
+      'The app shell still distinguishes the stop moment so later playback and visualisation work can plug into a clear state boundary.',
     accent: 'var(--phase-frozen)',
     nextActionLabel: 'End session',
   },
@@ -48,6 +48,10 @@ export const phaseDefinitions: Record<AppPhase, PhaseDefinition> = {
     accent: 'var(--phase-ended)',
     nextActionLabel: null,
   },
+}
+
+export function deriveAppPhaseFromSession(session: AuthSession): AppPhase {
+  return session.status === 'session-ready' ? 'ready' : 'setup'
 }
 
 export function getNextPhase(phase: AppPhase): AppPhase | null {

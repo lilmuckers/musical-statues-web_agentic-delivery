@@ -61,7 +61,9 @@ button {
 h1,
 h2,
 h3,
-p {
+p,
+dd,
+dt {
   margin-top: 0;
 }
 
@@ -108,8 +110,62 @@ p {
 
 .phase-list small,
 .panel ul,
-.panel p {
+.panel p,
+.profile-list dd {
   color: #cbd5e1;
+}
+
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  margin-bottom: 0.85rem;
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.status-chip--neutral {
+  background: rgba(59, 130, 246, 0.18);
+  color: #bfdbfe;
+}
+
+.status-chip--good {
+  background: rgba(34, 197, 94, 0.18);
+  color: #bbf7d0;
+}
+
+.status-chip--warning {
+  background: rgba(249, 115, 22, 0.18);
+  color: #fed7aa;
+}
+
+.profile-list {
+  display: grid;
+  gap: 0.75rem;
+  margin: 1rem 0;
+}
+
+.profile-list div {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.profile-list dt {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #94a3b8;
+}
+
+.error-copy {
+  color: #fda4af;
+}
+
+.stacked-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
 }
 
 .stage {
@@ -142,7 +198,8 @@ p {
   transition: transform 160ms ease, opacity 160ms ease, border-color 160ms ease;
 }
 
-.hero-card__actions button {
+.hero-card__actions button,
+.stacked-actions button {
   border: 0;
   border-radius: 999px;
   padding: 0.85rem 1.1rem;
@@ -152,16 +209,19 @@ p {
 }
 
 .hero-card__actions button:hover:not(:disabled),
-.phase-list li button:hover {
+.phase-list li button:hover,
+.stacked-actions button:hover:not(:disabled) {
   transform: translateY(-1px);
 }
 
-.hero-card__actions button:disabled {
+.hero-card__actions button:disabled,
+.stacked-actions button:disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }
 
-.hero-card__actions .primary {
+.hero-card__actions .primary,
+.stacked-actions .primary {
   background: #f8fafc;
   color: #0f172a;
   font-weight: 700;
