@@ -39,6 +39,33 @@ const authStateCopy: Record<HostAuthState, { title: string; body: string }> = {
   },
 }
 
+function getAuthErrorMessage(authError: string | null): string | null {
+  if (!authError) {
+    return null
+  }
+
+  if (authError === 'state_mismatch') {
+    return 'Spotify sign-in could not be completed safely because the auth state check failed. Please try again.'
+  }
+
+  if (authError === 'access_denied') {
+    return 'Spotify sign-in was cancelled or permissions were denied before the host session could be established.'
+  }
+
+  return `Spotify sign-in failed: ${authError.replace(/_/g, ' ')}.`
+}
+
+function clearAuthErrorQueryParam() {
+  const url = new URL(window.location.href)
+
+  if (!url.searchParams.has('authError')) {
+    return
+  }
+
+  url.searchParams.delete('authError')
+  window.history.replaceState({}, document.title, url.toString())
+}
+
 function getAuthStatusTone(status: HostAuthState): 'neutral' | 'good' | 'warning' {
   switch (status) {
     case 'session-ready':
@@ -65,20 +92,36 @@ export function App() {
 
   useEffect(() => {
     const controller = new AbortController()
+    const authError = new URLSearchParams(window.location.search).get('authError')
+    const authErrorMessage = getAuthErrorMessage(authError)
 
     async function restoreSession() {
       try {
         const restored = await fetchSession(controller.signal)
+
+        if (authErrorMessage) {
+          setSession({
+            ...getDefaultSession(),
+            status: 'session-expired',
+            canResume: true,
+            failureReason: authErrorMessage,
+          })
+          setPhase('setup')
+          clearAuthErrorQueryParam()
+          return
+        }
+
         setSession(restored)
         setPhase(restored.status === 'session-ready' ? 'ready' : 'setup')
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'Unable to restore Spotify session.'
+        const message = authErrorMessage ?? (error instanceof Error ? error.message : 'Unable to restore Spotify session.')
         setSession({
           ...getDefaultSession(),
           status: 'session-expired',
           canResume: true,
           failureReason: message,
         })
+        clearAuthErrorQueryParam()
       } finally {
         setLoadingSession(false)
       }

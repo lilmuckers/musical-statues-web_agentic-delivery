@@ -2,8 +2,6 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { App } from './App'
 
-const assignMock = vi.fn()
-
 vi.mock('./auth', () => ({
   fetchSession: vi.fn(),
   getDefaultSession: vi.fn(() => ({
@@ -23,12 +21,7 @@ const authModule = await import('./auth')
 
 beforeEach(() => {
   vi.clearAllMocks()
-  Object.defineProperty(window, 'location', {
-    configurable: true,
-    value: {
-      assign: assignMock,
-    },
-  })
+  window.history.replaceState({}, '', '/')
 })
 
 describe('App shell baseline', () => {
@@ -56,6 +49,31 @@ describe('App shell baseline', () => {
     expect(screen.getByText('premium')).toBeInTheDocument()
     expect(screen.getByText('Current phase: Ready')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Session ready for playback setup' })).toBeInTheDocument()
+  })
+
+  it('surfaces callback auth failure query params as a host-visible error state', async () => {
+    window.history.replaceState({}, '', '/?authError=state_mismatch')
+    vi.mocked(authModule.fetchSession).mockResolvedValue({
+      status: 'signed-out',
+      isAuthenticated: false,
+      profile: null,
+      scopes: [],
+      expiresAt: null,
+      canResume: false,
+      failureReason: null,
+    })
+
+    render(<App />)
+
+    await waitFor(() => {
+      expect(screen.getByText('Session expired / refresh failed')).toBeInTheDocument()
+    })
+
+    expect(
+      screen.getByText('Spotify sign-in could not be completed safely because the auth state check failed. Please try again.'),
+    ).toBeInTheDocument()
+    expect(window.location.search).toBe('')
+    expect(screen.getByText('Current phase: Setup')).toBeInTheDocument()
   })
 
   it('starts Spotify sign-in and keeps the UI in an auth-in-progress state until redirect', async () => {
