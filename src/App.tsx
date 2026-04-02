@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { fetchPlaybackAccessToken, fetchSession, getDefaultSession, signOut, startLogin } from './auth'
 import { getNextPhase, getPreviousPhase, phaseDefinitions, phaseOrder } from './appShell'
+import { createInitialGameplayState, getGameplayActionAvailability, reduceGameplayState } from './gameplay'
 import { fetchPlaylists, getPlaylistPreparationSummary, preparePlaylistSession } from './playlist'
 import { getDefaultPlaybackReadiness, initialisePlaybackDevice, loadSpotifySdk, unlockPlaybackDevice, type PlaybackController } from './playback'
-import type { AppPhase, AuthSession, HostAuthState, PlaybackReadiness, PlaylistPreparation, PlaylistSummary } from './types'
+import type { AppPhase, AuthSession, GameplayAction, GameplayState, HostAuthState, PlaybackReadiness, PlaylistPreparation, PlaylistSummary } from './types'
 
 const futureSlices = [
-  'Gameplay state machine and round controls',
   'Reactive visualisation and freeze transition',
 ]
 
@@ -65,11 +65,28 @@ function getPlaybackStatusTone(state: PlaybackReadiness['state']): 'neutral' | '
   }
 }
 
-function getSetupReadinessChecks(session: AuthSession, playback: PlaybackReadiness, preparation: PlaylistPreparation | null): string[] {
+function getGameplayStatusTone(status: GameplayState['status']): 'neutral' | 'good' | 'warning' {
+  switch (status) {
+    case 'round-playing': return 'good'
+    case 'round-stopped':
+    case 'session-ended': return 'warning'
+    default: return 'neutral'
+  }
+}
+
+function derivePhase(isReadyForSession: boolean, gameplay: GameplayState): AppPhase {
+  if (gameplay.status === 'round-playing') return 'playing'
+  if (gameplay.status === 'round-stopped') return 'frozen'
+  if (gameplay.status === 'session-ended') return 'session-ended'
+  return isReadyForSession ? 'ready' : 'setup'
+}
+
+function getSetupReadinessChecks(session: AuthSession, playback: PlaybackReadiness, preparation: PlaylistPreparation | null, gameplay: GameplayState): string[] {
   return [
     `Spotify host session: ${session.status === 'session-ready' ? 'ready' : authStateCopy[session.status].title.toLowerCase()}`,
     `Browser playback device: ${playback.state === 'device-ready' ? 'ready' : playback.message}`,
     `Playlist session preparation: ${getPlaylistPreparationSummary(preparation)}`,
+    `Gameplay control state: ${gameplay.message}`,
   ]
 }
 
@@ -77,6 +94,7 @@ export function App() {
   const [phase, setPhase] = useState<AppPhase>('setup')
   const [session, setSession] = useState<AuthSession>(() => getDefaultSession())
   const [playback, setPlayback] = useState<PlaybackReadiness>(() => getDefaultPlaybackReadiness())
+  const [gameplay, setGameplay] = useState<GameplayState>(() => createInitialGameplayState())
   const [playlists, setPlaylists] = useState<PlaylistSummary[]>([])
   const [selectedPlaylistId, setSelectedPlaylistId] = useState('')
   const [preparation, setPreparation] = useState<PlaylistPreparation | null>(null)
@@ -90,8 +108,9 @@ export function App() {
   const nextPhase = useMemo(() => getNextPhase(phase), [phase])
   const previousPhase = useMemo(() => getPreviousPhase(phase), [phase])
   const authCopy = authStateCopy[session.status]
-  const setupChecks = useMemo(() => getSetupReadinessChecks(session, playback, preparation), [session, playback, preparation])
+  const setupChecks = useMemo(() => getSetupReadinessChecks(session, playback, preparation, gameplay), [session, playback, preparation, gameplay])
   const isReadyForSession = playback.state === 'device-ready' && Boolean(preparation?.playableTracks.length)
+  const gameplayActions = useMemo(() => getGameplayActionAvailability(gameplay, preparation), [gameplay, preparation])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -131,6 +150,7 @@ export function App() {
       controllerRef.current?.disconnect()
       controllerRef.current = null
       setPlayback(getDefaultPlaybackReadiness())
+      setGamePlaySafeReset()
       setPlaylists([])
       setSelectedPlaylistId('')
       setPreparation(null)
@@ -161,12 +181,42 @@ export function App() {
   useEffect(() => {
     if (preparation && selectedPlaylistId && preparation.selectedPlaylistId !== selectedPlaylistId) {
       setPreparation(null)
+      setGamePlaySafeReset('Playlist changed. Prepare the new playlist before starting the round again.')
     }
   }, [preparation, selectedPlaylistId])
 
   useEffect(() => {
-    setPhase(isReadyForSession ? 'ready' : 'setup')
-  }, [isReadyForSession])
+    if (!isReadyForSession && gameplay.status !== 'session-ended') {
+      setGameplay((current) => current.status === 'idle' ? current : {
+        ...createInitialGameplayState(),
+        roundNumber: current.roundNumber,
+        message: 'Prepare playback and a session playlist to unlock the next round.',
+      })
+    }
+  }, [gameplay.status, isReadyForSession])
+
+  useEffect(() => {
+    setPhase(derivePhase(isReadyForSession, gameplay))
+  }, [gameplay, isReadyForSession])
+
+  function setGamePlaySafeReset(message = 'Prepare playback and a session playlist to unlock the first round.') {
+    setGameplay({
+      ...createInitialGameplayState(),
+      message,
+    })
+  }
+
+  function handleGameplayAction(action: GameplayAction) {
+    const result = reduceGameplayState(gameplay, action, preparation)
+    setGameplay(result.nextState)
+
+    if (!result.accepted) {
+      setActionError(result.nextState.message)
+      return
+    }
+
+    setActionError(null)
+  }
 
   async function handleSignIn() {
     setActionError(null)
@@ -191,6 +241,7 @@ export function App() {
       const signedOut = await signOut()
       setSession(signedOut)
       setPlayback(getDefaultPlaybackReadiness())
+      setGamePlaySafeReset()
       setPlaylists([])
       setSelectedPlaylistId('')
       setPreparation(null)
@@ -246,6 +297,7 @@ export function App() {
     try {
       const prepared = await preparePlaylistSession(selectedPlaylistId)
       setPreparation(prepared)
+      setGamePlaySafeReset(`Playlist prepared. ${prepared.playableTracks.length} playable tracks are ready for round control.`)
     } catch (error) {
       setActionError(error instanceof Error ? error.message : 'Unable to prepare the selected playlist session.')
     } finally {
@@ -258,7 +310,7 @@ export function App() {
       <aside className="app-shell__sidebar">
         <p className="eyebrow">Musical Statues Web</p>
         <h1>Host control baseline</h1>
-        <p className="lede">Auth, browser playback readiness, and playlist/session preparation are now wired into the facilitator shell; gameplay flow remains deferred to the next slice.</p>
+        <p className="lede">Auth, browser playback readiness, playlist/session preparation, and deterministic gameplay controls are now wired into the facilitator shell; visualisation remains deferred to the next slice.</p>
 
         <div className="panel">
           <h2>Host auth state</h2>
@@ -305,6 +357,22 @@ export function App() {
         </div>
 
         <div className="panel">
+          <h2>Gameplay controls</h2>
+          <p className={`status-chip status-chip--${getGameplayStatusTone(gameplay.status)}`}>{gameplay.status.replace(/-/g, ' ')}</p>
+          <p>{gameplay.message}</p>
+          <dl className="profile-list">
+            <div><dt>Round</dt><dd>{gameplay.roundNumber || 'Not started'}</dd></div>
+            <div><dt>Current track</dt><dd>{gameplay.activeTrackName ?? 'No track active'}</dd></div>
+          </dl>
+          <div className="stacked-actions">
+            <button type="button" className="primary" onClick={() => handleGameplayAction('start-round')} disabled={!gameplayActions.canStartRound}>Start round</button>
+            <button type="button" onClick={() => handleGameplayAction('stop-round')} disabled={!gameplayActions.canStopRound}>Manual stop</button>
+            <button type="button" onClick={() => handleGameplayAction('reset-round')} disabled={!gameplayActions.canResetRound}>Next round reset</button>
+            <button type="button" onClick={() => handleGameplayAction('end-session')} disabled={!gameplayActions.canEndSession}>End session</button>
+          </div>
+        </div>
+
+        <div className="panel">
           <h2>Round phases</h2>
           <ol className="phase-list">{phaseOrder.map((phaseId) => { const item = phaseDefinitions[phaseId]; const isActive = phaseId === phase; return <li key={phaseId} className={isActive ? 'is-active' : undefined}><button type="button" onClick={() => setPhase(phaseId)}><span>{item.label}</span><small>{item.heading}</small></button></li> })}</ol>
         </div>
@@ -320,6 +388,7 @@ export function App() {
           <p className="status-pill">Current phase: {definition.label}</p>
           <h2 id="phase-heading">{definition.heading}</h2>
           <p>{definition.summary}</p>
+
           <div className="hero-card__actions">
             <button type="button" onClick={() => previousPhase && setPhase(previousPhase)} disabled={!previousPhase}>Previous state</button>
             <button type="button" className="primary" onClick={() => nextPhase && setPhase(nextPhase)} disabled={!nextPhase || (phase === 'setup' && !isReadyForSession)}>{definition.nextActionLabel ?? 'Session complete'}</button>
@@ -327,8 +396,8 @@ export function App() {
         </section>
 
         <section className="panel panel--grid" aria-label="Delivery baseline details">
-          <article><h3>What exists now</h3><p>The shell restores host session state, prepares the browser playback device, fetches Spotify playlists, and resolves a session-ready playable track list while visibly flagging skipped tracks.</p></article>
-          <article><h3>Ready gating</h3><p>The app only enters Ready once both browser playback readiness and playlist/session preparation preconditions are satisfied.</p></article>
+          <article><h3>What exists now</h3><p>The shell restores host session state, prepares the browser playback device, fetches Spotify playlists, resolves a playable session track list, and runs a deterministic gameplay state machine for facilitator controls.</p></article>
+          <article><h3>Control safety</h3><p>Invalid gameplay controls are disabled in the UI and also rejected safely by the pure reducer, so state transitions remain deterministic and testable outside the rendering layer.</p></article>
           <article><h3>Next integration slices</h3><ul>{futureSlices.map((slice) => <li key={slice}>{slice}</li>)}</ul></article>
         </section>
       </main>
