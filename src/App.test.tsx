@@ -100,6 +100,39 @@ describe('App gameplay control slice', () => {
     expect(within(roundPhasesPanel).getByText('Reached only through the End session gameplay control.')).toBeInTheDocument()
   })
 
+  it('drives the visual layer distinctly for ready, playing, freeze, and session-end phases', async () => {
+    const user = userEvent.setup()
+    mockReadyHostShell()
+    vi.mocked(playlistModule.preparePlaylistSession).mockResolvedValue({
+      selectedPlaylistId: 'playlist-1', selectedPlaylistName: 'Party Starters', totalTracks: 2,
+      playableTracks: [
+        { id: 'track-1', name: 'Freeze Dance', artistNames: ['The Movers'], durationMs: 180000, albumName: 'Party', isPlayable: true, reason: null },
+        { id: 'track-2', name: 'Statues Theme', artistNames: ['The Movers'], durationMs: 175000, albumName: 'Party', isPlayable: true, reason: null },
+      ],
+      skippedTracks: [],
+    })
+
+    render(<App />)
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Prepare browser playback' })).toBeEnabled())
+    await user.click(screen.getByRole('button', { name: 'Prepare browser playback' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Unlock browser audio' })).toBeEnabled())
+    await user.click(screen.getByRole('button', { name: 'Unlock browser audio' }))
+    await user.click(screen.getByRole('button', { name: 'Prepare session playlist' }))
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Ready for the next round' })).toBeInTheDocument())
+
+    const controlsPanel = screen.getByText('Gameplay controls').closest('.panel') as HTMLElement
+    await user.click(within(controlsPanel).getByRole('button', { name: 'Start round' }))
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Keep moving' })).toBeInTheDocument())
+
+    await user.click(within(controlsPanel).getByRole('button', { name: 'Manual stop' }))
+    await waitFor(() => expect(screen.getAllByText('Freeze!').length).toBeGreaterThan(0))
+    expect(screen.getByRole('status')).toHaveTextContent('The music has stopped — hold still now.')
+
+    await user.click(within(controlsPanel).getByRole('button', { name: 'End session' }))
+    await waitFor(() => expect(screen.getAllByRole('heading', { name: 'Session complete' }).length).toBeGreaterThan(0))
+  })
+
   it('supports start, manual stop, next-round reset, and end session via deterministic host controls', async () => {
     const user = userEvent.setup()
     mockReadyHostShell()

@@ -5,6 +5,7 @@ import { createInitialGameplayState, getGameplayActionAvailability, reduceGamepl
 import { fetchPlaylists, getPlaylistPreparationSummary, preparePlaylistSession } from './playlist'
 import { getDefaultPlaybackReadiness, initialisePlaybackDevice, loadSpotifySdk, unlockPlaybackDevice, type PlaybackController } from './playback'
 import type { AppPhase, AuthSession, GameplayAction, GameplayState, HostAuthState, PlaybackReadiness, PlaylistPreparation, PlaylistSummary } from './types'
+import { VisualisationLayer } from './visualisation'
 
 const futureSlices = [
   'Reactive visualisation and freeze transition',
@@ -401,6 +402,8 @@ export function App() {
       </aside>
 
       <main className="stage" style={{ '--phase-accent': definition.accent } as React.CSSProperties}>
+        <VisualisationLayer phase={phase} gameplay={gameplay} />
+
         <section className="hero-card" aria-labelledby="phase-heading">
           <p className="status-pill">Current phase: {definition.label}</p>
           <h2 id="phase-heading">{definition.heading}</h2>
@@ -409,8 +412,8 @@ export function App() {
         </section>
 
         <section className="panel panel--grid" aria-label="Delivery baseline details">
-          <article><h3>What exists now</h3><p>The shell restores host session state, prepares the browser playback device, fetches Spotify playlists, resolves a playable session track list, and runs a deterministic gameplay state machine for facilitator controls.</p></article>
-          <article><h3>Control safety</h3><p>Invalid gameplay controls are disabled in the UI and also rejected safely by the pure reducer, and direct phase-navigation bypass has been removed so gameplay-visible state stays deterministic.</p></article>
+          <article><h3>What exists now</h3><p>The shell restores host session state, prepares the browser playback device, fetches Spotify playlists, resolves a playable session track list, runs a deterministic gameplay state machine, and drives a full-screen visual layer from those reducer-backed phases.</p></article>
+          <article><h3>Visual baseline</h3><p>The visual layer reacts immediately between ready, playing, freeze, and session-end states, keeps effects CSS-driven for baseline performance, and leaves a clean seam for later audio-analysis enrichment.</p></article>
           <article><h3>Next integration slices</h3><ul>{futureSlices.map((slice) => <li key={slice}>{slice}</li>)}</ul></article>
         </section>
       </main>
