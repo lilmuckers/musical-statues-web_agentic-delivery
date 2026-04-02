@@ -1,45 +1,107 @@
 # Musical Statues Web
 
-A browser-based Musical Statues game that uses Spotify playback plus a reactive, Windows Media Player–inspired visualisation layer.
+A browser-based Musical Statues game that uses Spotify playback and a reactive visualisation layer.
 
-This repository is intentionally starting from a clean slate. The initial project definition lives in the GitHub wiki, with a concise in-repo entrypoint in [`SPEC.md`](./SPEC.md).
+This repository now contains the **application shell and delivery baseline** for the facilitator-hosted Musical Statues experience. The current implementation establishes the React/Vite app scaffold, the host session shell, baseline test/lint/build tooling, and GitHub Actions validation so later Spotify and gameplay slices can build on a stable foundation.
 
-## Current Status
+## Current implementation baseline
 
-This repository currently contains project-definition artefacts only. Implementation work should follow from discrete GitHub issues once the specification is reviewed.
+The app currently provides:
 
-## Planned MVP
+- a Vite + React + TypeScript application scaffold
+- a facilitator-focused host control shell
+- placeholder round/session phases for setup, ready, playing, freeze, and session end
+- readiness and delivery scaffolding for future Spotify, playback, and visualisation work
+- baseline lint, test, and build automation aligned with CI
 
-- Spotify login for a user with an active Premium account
-- Playlist selection from the user’s Spotify account
-- Browser-based playback control via the Spotify Web Playback SDK
-- Musical Statues gameplay loop with clear rounds/states
-- Reactive visualisation responding to playback and Spotify audio-analysis features
-- A facilitator / shared-screen friendly play mode
+The current app shell intentionally uses placeholders for Spotify auth, playback, playlist preparation, and the reactive visualisation layer. Those integrations land in later delivery slices, but the frame they plug into already exists.
 
-## Repository Source of Truth
+## Quick start
 
-- Product/spec summary: [`SPEC.md`](./SPEC.md)
-- Detailed project definition and architecture: GitHub wiki
-- Scoped build tasks and acceptance criteria: GitHub issues
+### Prerequisites
 
-## Expected Setup Direction
+- Node.js 22
+- npm 10+
 
-Implementation has not been bootstrapped yet, but the current intended direction is:
+### Install
 
-- Frontend: web app (likely React + TypeScript + Vite or Next.js)
-- Spotify integration: Spotify Web API + Web Playback SDK
-- Visualisation: browser rendering stack such as Canvas/WebGL
-- Hosting: static frontend plus lightweight backend/API surface only if needed for auth/session support
+```bash
+npm install
+```
 
-## Before Building
+### Run locally
 
-Read the following first:
+```bash
+npm run dev
+```
 
-1. [`SPEC.md`](./SPEC.md)
-2. Wiki: Home / Project Definition / Architecture / Spotify Integration / Visualisation & Gameplay
-3. Issue-specific acceptance criteria
+Vite will print the local development URL, typically `http://localhost:5173`.
 
-## Non-goal of this commit
+### Validate locally
 
-This repository update does **not** implement the application. It only establishes the durable specification baseline needed for subsequent delivery.
+```bash
+npm run lint
+npm run test
+npm run build
+```
+
+These commands match the baseline GitHub Actions checks for this repository.
+
+For deeper local setup and workflow detail, see [`docs/local-development.md`](./docs/local-development.md).
+
+## Current product shape
+
+Musical Statues Web is designed for a **single facilitator-hosted session**:
+
+- the host signs in with Spotify
+- selects a playlist
+- prepares a browser playback device
+- starts and stops rounds of music
+- uses a shared-screen visual experience to reinforce the game state for players in the room
+
+## MVP boundaries
+
+The MVP aims to deliver:
+
+- a laptop/desktop browser experience for one host
+- Spotify authentication for a Premium user
+- playlist selection from the host account
+- Spotify Web Playback SDK playback in the browser
+- clear gameplay/session states for running rounds
+- a reactive visualiser driven by playback timing and Spotify analysis data when available
+- graceful fallback behaviour when Spotify analysis or playback conditions are limited
+
+The MVP explicitly does **not** aim to deliver:
+
+- player accounts or remote participants
+- automatic elimination detection or camera judging
+- support for non-Spotify music sources
+- tournament management or persistent scoring
+- advanced visualiser customisation tooling
+
+## Source of truth
+
+- In-repo summary: [`SPEC.md`](./SPEC.md)
+- Detailed product and architecture definition: staged wiki source in [`docs/project-wiki/`](./docs/project-wiki/)
+- Local setup and validation flow: [`docs/local-development.md`](./docs/local-development.md)
+- Scoped delivery work and acceptance criteria: GitHub issues
+
+## Staged wiki pages
+
+- [`Home`](./docs/project-wiki/Home.md)
+- [`Project-Definition`](./docs/project-wiki/Project-Definition.md)
+- [`Architecture`](./docs/project-wiki/Architecture.md)
+- [`Spotify-Integration`](./docs/project-wiki/Spotify-Integration.md)
+- [`Visualisation-and-Gameplay`](./docs/project-wiki/Visualisation-and-Gameplay.md)
+
+## Next delivery slices
+
+The current recommended follow-on slices are:
+
+1. Spotify auth and session lifecycle
+2. playback device readiness and browser constraints
+3. playlist selection and session preparation
+4. gameplay state machine and host controls
+5. visualisation baseline and freeze transition
+6. Spotify analysis ingestion and mapping layer
+7. integrated session validation
