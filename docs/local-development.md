@@ -53,7 +53,7 @@ npm run dev
 
 Vite will print the local development URL, typically `http://localhost:5173` or `http://127.0.0.1:5173`.
 
-## Current auth/session baseline
+## Current auth + playback baseline
 
 This slice implements:
 
@@ -61,10 +61,21 @@ This slice implements:
 - backend code exchange and refresh handling
 - encrypted HttpOnly cookie session storage
 - same-origin session restoration on reload via `/api/auth/session`
-- explicit host-visible auth/session states for signed out, auth in progress, session ready, not Premium, and session expired / refresh failed
-- sign-out that clears the backend session and resets the local host state
+- same-origin playback token retrieval via `/api/auth/playback-token`
+- Spotify Web Playback SDK loading in the browser
+- browser playback-device creation with a host-visible readiness panel
+- explicit autoplay / user-gesture guidance through an in-app unlock step
+- in-app retry for recoverable device setup failures without forcing a full page reload
+- clear unsupported/degraded browser messaging when the SDK cannot be used safely
 
-Playback-device readiness, autoplay/browser constraints, and playlist preparation remain intentionally out of scope for this issue and land in follow-on slices.
+Playlist preparation, actual playback transfer/control flows, and gameplay orchestration remain intentionally out of scope for this slice and land in follow-on issues.
+
+## Playback readiness notes
+
+- browser playback requires a Spotify Premium host account
+- use a supported desktop browser with audio enabled
+- Spotify Web Playback SDK requires a secure context (`https://` or localhost)
+- after the browser device is created, the host may still need to complete the explicit unlock action once to satisfy browser autoplay rules
 
 ## Quality gates
 

@@ -31,3 +31,23 @@ export interface AuthSession {
   canResume: boolean
   failureReason: string | null
 }
+
+export type PlaybackReadinessState =
+  | 'idle'
+  | 'sdk-loading'
+  | 'sdk-ready'
+  | 'device-connecting'
+  | 'device-ready'
+  | 'user-action-required'
+  | 'unsupported-browser'
+  | 'device-error'
+
+export interface PlaybackReadiness {
+  state: PlaybackReadinessState
+  deviceName: string | null
+  deviceId: string | null
+  message: string
+  needsUserAction: boolean
+  isRecoverable: boolean
+  sdkLoaded: boolean
+}

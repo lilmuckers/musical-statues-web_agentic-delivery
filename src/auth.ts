@@ -14,6 +14,10 @@ interface StartLoginResponse {
   authorizeUrl: string
 }
 
+interface PlaybackTokenResponse {
+  accessToken: string
+}
+
 export async function fetchSession(signal?: AbortSignal): Promise<AuthSession> {
   const response = await fetch('/api/auth/session', {
     credentials: 'include',
@@ -25,6 +29,20 @@ export async function fetchSession(signal?: AbortSignal): Promise<AuthSession> {
   }
 
   return (await response.json()) as AuthSession
+}
+
+export async function fetchPlaybackAccessToken(): Promise<string> {
+  const response = await fetch('/api/auth/playback-token', {
+    credentials: 'include',
+  })
+
+  if (!response.ok) {
+    const message = await response.text()
+    throw new Error(message || 'Unable to fetch a Spotify playback token.')
+  }
+
+  const body = (await response.json()) as PlaybackTokenResponse
+  return body.accessToken
 }
 
 export async function startLogin(): Promise<void> {
