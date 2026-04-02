@@ -80,3 +80,20 @@ export interface PlaylistPreparation {
   skippedTracks: SessionTrack[]
   totalTracks: number
 }
+
+export type GameplayStatus = 'idle' | 'starting-round' | 'round-playing' | 'round-stopped' | 'session-ended'
+
+export type GameplayAction = 'start-round' | 'stop-round' | 'reset-round' | 'end-session'
+
+export interface GameplayState {
+  status: GameplayStatus
+  roundNumber: number
+  activeTrackName: string | null
+  message: string
+}
+
+export interface GameplayTransitionResult {
+  nextState: GameplayState
+  accepted: boolean
+  reason: string
+}
