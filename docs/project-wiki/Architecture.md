@@ -19,11 +19,15 @@ A TypeScript web app responsible for:
 - synchronising playback position with visual effects
 
 ### Backend / Server Support
-A minimal backend may be required for:
+The MVP should include a **minimal auth-capable backend/serverless surface** for:
 
-- Spotify OAuth token exchange/refresh if not handled fully by a frontend-safe pattern
-- secure handling of client secrets
+- Spotify OAuth callback handling using Authorization Code + PKCE
+- secrets-bearing token exchange and refresh operations
+- keeping the Spotify client secret and refresh token out of browser-accessible storage
+- exposing same-origin session status to the frontend
 - optional caching/proxying of selected Spotify metadata or audio-analysis responses
+
+This backend surface should stay intentionally narrow. It exists to support Spotify auth/session safety, not to introduce a broad application backend.
 
 ### External Dependency
 - Spotify Web API
@@ -32,7 +36,11 @@ A minimal backend may be required for:
 ## Logical Modules
 
 ### 1. Auth Module
-Handles login, token lifecycle, session recovery, and Premium/playback eligibility messaging.
+Handles login, token lifecycle, session recovery, sign-out, and Premium/playback eligibility messaging.
+
+Recommended split:
+- **frontend**: login entrypoint UI, callback/result handling, auth-state rendering, session polling/bootstrap, and sign-out UX
+- **backend/serverless**: code exchange, refresh handling, secure session cookie issuance, and session invalidation
 
 ### 2. Spotify Playback Module
 Owns player initialisation, device readiness, current track state, pause/play/seek commands, and error handling.
@@ -51,14 +59,17 @@ Turns playback and analysis signals into rendered effects using Canvas/WebGL.
 
 ## Suggested Data Flow
 
-1. User authenticates with Spotify.
-2. App loads playlists and selected track metadata.
-3. Playback module creates/attaches to a Spotify web player device.
-4. Analysis pipeline prefetches audio features and audio analysis for queued tracks where possible.
-5. Gameplay engine starts a round and commands playback.
-6. Playback time updates feed the visualisation engine.
-7. Segment/section/beat data modulates visual parameters.
-8. Stop event transitions gameplay and visual state together.
+1. User starts Spotify sign-in from the frontend.
+2. Spotify redirects back to a backend/serverless callback endpoint.
+3. Backend exchanges the authorization code, stores/anchors refresh capability in a secure HttpOnly session, and returns the user to the app.
+4. Frontend loads session state from a same-origin auth/session endpoint.
+5. App loads playlists and selected track metadata.
+6. Playback module creates/attaches to a Spotify web player device.
+7. Analysis pipeline prefetches audio features and audio analysis for queued tracks where possible.
+8. Gameplay engine starts a round and commands playback.
+9. Playback time updates feed the visualisation engine.
+10. Segment/section/beat data modulates visual parameters.
+11. Stop event transitions gameplay and visual state together.
 
 ## Suggested Technical Baseline
 
